@@ -44,6 +44,18 @@ export function KanbanBoard() {
     if (task) setActiveTask(task);
   };
 
+  const findColumnId = (id: string): TaskStatus | null => {
+    // Check if it's a column id
+    const column = COLUMNS.find(c => c.id === id);
+    if (column) return column.id;
+
+    // Check if it's a task id - find which column the task belongs to
+    const task = tasks.find(t => t.id === id);
+    if (task) return task.status;
+
+    return null;
+  };
+
   const handleDragOver = (event: DragOverEvent) => {
     const { active, over } = event;
     if (!over) return;
@@ -54,11 +66,11 @@ export function KanbanBoard() {
     const activeTask = tasks.find(t => t.id === activeId);
     if (!activeTask) return;
 
-    const overColumn = COLUMNS.find(c => c.id === overId);
-    if (overColumn && activeTask.status !== overColumn.id) {
+    const overColumnId = findColumnId(overId);
+    if (overColumnId && activeTask.status !== overColumnId) {
       setTasks(prev =>
         prev.map(t =>
-          t.id === activeId ? { ...t, status: overColumn.id } : t
+          t.id === activeId ? { ...t, status: overColumnId } : t
         )
       );
     }
@@ -72,11 +84,11 @@ export function KanbanBoard() {
     const activeId = active.id as string;
     const overId = over.id as string;
 
-    const overColumn = COLUMNS.find(c => c.id === overId);
-    if (overColumn) {
+    const overColumnId = findColumnId(overId);
+    if (overColumnId) {
       setTasks(prev =>
         prev.map(t =>
-          t.id === activeId ? { ...t, status: overColumn.id } : t
+          t.id === activeId ? { ...t, status: overColumnId } : t
         )
       );
     }
