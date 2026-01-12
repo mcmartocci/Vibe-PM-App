@@ -13,7 +13,8 @@ interface KanbanColumnProps {
   onAddTask: (title: string, status: TaskStatus, priority: TaskPriority) => void;
   onDeleteTask: (id: string) => void;
   onUpdatePriority: (id: string, priority: TaskPriority) => void;
-  index: number;
+  onMoveClick?: (task: Task) => void;
+  onTaskClick?: (task: Task) => void;
 }
 
 const statusConfig: Record<TaskStatus, { color: string; glow: string }> = {
@@ -31,7 +32,7 @@ const statusConfig: Record<TaskStatus, { color: string; glow: string }> = {
   },
 };
 
-export function KanbanColumn({ column, tasks, onAddTask, onDeleteTask, onUpdatePriority, index }: KanbanColumnProps) {
+export function KanbanColumn({ column, tasks, onAddTask, onDeleteTask, onUpdatePriority, onMoveClick, onTaskClick }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
   });
@@ -56,7 +57,7 @@ export function KanbanColumn({ column, tasks, onAddTask, onDeleteTask, onUpdateP
       <div
         ref={setNodeRef}
         className={cn(
-          'flex-1 rounded-xl p-3 space-y-3 min-h-[200px]',
+          'flex-1 rounded-xl p-3 min-h-[200px]',
           'transition-all duration-300 ease-out',
           config.glow,
           isOver
@@ -65,18 +66,21 @@ export function KanbanColumn({ column, tasks, onAddTask, onDeleteTask, onUpdateP
         )}
       >
         <SortableContext items={tasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
-          {tasks.map((task, i) => (
-            <div
+          {tasks.map((task) => (
+            <TaskCard
               key={task.id}
-              className="animate-in"
-              style={{ animationDelay: `${(index * 100) + (i * 50)}ms` }}
-            >
-              <TaskCard task={task} onDelete={onDeleteTask} onUpdatePriority={onUpdatePriority} />
-            </div>
+              task={task}
+              onDelete={onDeleteTask}
+              onUpdatePriority={onUpdatePriority}
+              onMoveClick={onMoveClick}
+              onTaskClick={onTaskClick}
+            />
           ))}
         </SortableContext>
 
-        <AddTaskForm onAdd={(title, priority) => onAddTask(title, column.id, priority)} />
+        <div className="mt-3">
+          <AddTaskForm onAdd={(title, priority) => onAddTask(title, column.id, priority)} />
+        </div>
       </div>
     </div>
   );

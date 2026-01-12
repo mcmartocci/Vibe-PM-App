@@ -9,16 +9,12 @@ import {
   useSensor,
   useSensors,
   closestCorners,
-  DragOverlay,
-  DragStartEvent,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { useState } from 'react';
 import { Task, TaskStatus, TaskPriority, ColumnConfig } from '@/types';
-import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { generateId } from '@/lib/utils';
 import { KanbanColumn } from './KanbanColumn';
-import { TaskCard } from './TaskCard';
 import { PriorityFilter } from './PriorityFilter';
 
 const COLUMNS: ColumnConfig[] = [
@@ -27,14 +23,28 @@ const COLUMNS: ColumnConfig[] = [
   { id: 'complete', title: 'Done' },
 ];
 
-export function KanbanBoard() {
-  const [tasks, setTasks, isHydrated] = useLocalStorage<Task[]>('pm-tasks', []);
-  const [activeTask, setActiveTask] = useState<Task | null>(null);
+interface KanbanBoardProps {
+  tasks: Task[];
+  onTasksChange: (tasks: Task[]) => void;
+  onMoveClick?: (task: Task) => void;
+  onTaskClick?: (task: Task) => void;
+}
+
+export function KanbanBoard({ tasks = [], onTasksChange, onMoveClick, onTaskClick }: KanbanBoardProps) {
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority[]>([]);
 
+  const safeTasks = tasks || [];
   const filteredTasks = priorityFilter.length === 0
-    ? tasks
-    : tasks.filter(t => priorityFilter.includes(t.priority || 'medium'));
+    ? safeTasks
+    : safeTasks.filter(t => priorityFilter.includes(t.priority || 'medium'));
+
+  // Sort by priority: high -> medium -> low
+  const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
+  const sortedTasks = [...filteredTasks].sort((a, b) => {
+    const aPriority = priorityOrder[a.priority || 'medium'] ?? 1;
+    const bPriority = priorityOrder[b.priority || 'medium'] ?? 1;
+    return aPriority - bPriority;
+  });
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -45,18 +55,11 @@ export function KanbanBoard() {
     })
   );
 
-  const handleDragStart = (event: DragStartEvent) => {
-    const task = tasks.find(t => t.id === event.active.id);
-    if (task) setActiveTask(task);
-  };
-
   const findColumnId = (id: string): TaskStatus | null => {
-    // Check if it's a column id
     const column = COLUMNS.find(c => c.id === id);
     if (column) return column.id;
 
-    // Check if it's a task id - find which column the task belongs to
-    const task = tasks.find(t => t.id === id);
+    const task = safeTasks.find(t => t.id === id);
     if (task) return task.status;
 
     return null;
@@ -69,77 +72,117 @@ export function KanbanBoard() {
     const activeId = active.id as string;
     const overId = over.id as string;
 
-    const activeTask = tasks.find(t => t.id === activeId);
-    if (!activeTask) return;
+    const task = safeTasks.find(t => t.id === activeId);
+    if (!task) return;
 
     const overColumnId = findColumnId(overId);
-    if (overColumnId && activeTask.status !== overColumnId) {
-      setTasks(prev =>
-        prev.map(t =>
-          t.id === activeId ? { ...t, status: overColumnId } : t
+    if (overColumnId && task.status !== overColumnId) {
+      const oldStatus = task.status;
+      onTasksChange(
+        safeTasks.map(t =>
+          t.id === activeId
+            ? {
+                ...t,
+                status: overColumnId,
+                changelog: [
+                  ...(t.changelog || []),
+                  {
+                    id: generateId(),
+                    type: 'status' as const,
+                    timestamp: Date.now(),
+                    from: oldStatus,
+                    to: overColumnId,
+                  },
+                ],
+              }
+            : t
         )
       );
     }
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
-    setActiveTask(null);
     const { active, over } = event;
     if (!over) return;
 
     const activeId = active.id as string;
     const overId = over.id as string;
 
+    const task = safeTasks.find(t => t.id === activeId);
+    if (!task) return;
+
     const overColumnId = findColumnId(overId);
-    if (overColumnId) {
-      setTasks(prev =>
-        prev.map(t =>
-          t.id === activeId ? { ...t, status: overColumnId } : t
+    if (overColumnId && task.status !== overColumnId) {
+      const oldStatus = task.status;
+      onTasksChange(
+        safeTasks.map(t =>
+          t.id === activeId
+            ? {
+                ...t,
+                status: overColumnId,
+                changelog: [
+                  ...(t.changelog || []),
+                  {
+                    id: generateId(),
+                    type: 'status' as const,
+                    timestamp: Date.now(),
+                    from: oldStatus,
+                    to: overColumnId,
+                  },
+                ],
+              }
+            : t
         )
       );
     }
   };
 
   const handleAddTask = (title: string, status: TaskStatus, priority: TaskPriority) => {
+    const now = Date.now();
     const newTask: Task = {
       id: generateId(),
       title,
       status,
       priority,
-      createdAt: Date.now(),
-      order: tasks.filter(t => t.status === status).length,
+      createdAt: now,
+      order: safeTasks.filter(t => t.status === status).length,
+      changelog: [{
+        id: generateId(),
+        type: 'created',
+        timestamp: now,
+      }],
     };
-    setTasks(prev => [...prev, newTask]);
+    onTasksChange([...safeTasks, newTask]);
   };
 
   const handleDeleteTask = (id: string) => {
-    setTasks(prev => prev.filter(t => t.id !== id));
+    onTasksChange(safeTasks.filter(t => t.id !== id));
   };
 
   const handleUpdatePriority = (id: string, priority: TaskPriority) => {
-    setTasks(prev =>
-      prev.map(t => (t.id === id ? { ...t, priority } : t))
+    onTasksChange(
+      safeTasks.map(t => {
+        if (t.id === id) {
+          const oldPriority = t.priority || 'medium';
+          return {
+            ...t,
+            priority,
+            changelog: [
+              ...(t.changelog || []),
+              {
+                id: generateId(),
+                type: 'priority' as const,
+                timestamp: Date.now(),
+                from: oldPriority,
+                to: priority,
+              },
+            ],
+          };
+        }
+        return t;
+      })
     );
   };
-
-  if (!isHydrated) {
-    return (
-      <div className="grid grid-cols-3 gap-6 h-full">
-        {COLUMNS.map((column, i) => (
-          <div key={column.id} className="flex flex-col h-full">
-            <div
-              className="h-8 w-28 bg-elevated rounded-lg mb-4 animate-pulse-soft"
-              style={{ animationDelay: `${i * 100}ms` }}
-            />
-            <div className="flex-1 rounded-xl bg-surface/50 p-3 space-y-3">
-              <div className="h-20 bg-elevated rounded-xl animate-pulse-soft" />
-              <div className="h-20 bg-elevated rounded-xl animate-pulse-soft" />
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  }
 
   return (
     <div className="flex flex-col h-full gap-4">
@@ -148,30 +191,23 @@ export function KanbanBoard() {
       <DndContext
         sensors={sensors}
         collisionDetection={closestCorners}
-        onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
       >
         <div className="grid grid-cols-3 gap-6 flex-1 min-h-0">
-          {COLUMNS.map((column, index) => (
+          {COLUMNS.map((column) => (
             <KanbanColumn
               key={column.id}
               column={column}
-              tasks={filteredTasks.filter(t => t.status === column.id)}
+              tasks={sortedTasks.filter(t => t.status === column.id)}
               onAddTask={handleAddTask}
               onDeleteTask={handleDeleteTask}
               onUpdatePriority={handleUpdatePriority}
-              index={index}
+              onMoveClick={onMoveClick}
+              onTaskClick={onTaskClick}
             />
           ))}
         </div>
-        <DragOverlay>
-          {activeTask ? (
-            <div className="rotate-2 scale-105">
-              <TaskCard task={activeTask} onDelete={() => {}} onUpdatePriority={() => {}} isDragOverlay />
-            </div>
-          ) : null}
-        </DragOverlay>
       </DndContext>
     </div>
   );
