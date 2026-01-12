@@ -1,45 +1,99 @@
 @import "tailwindcss";
 
-@theme inline {
-  /* Deep atmospheric backgrounds */
-  --color-void: #050506;
-  --color-midnight: #0a0a0c;
-  --color-surface: #111114;
-  --color-elevated: #18181c;
-  --color-hover: #1f1f24;
+/* Base CSS custom properties - these change with theme */
+:root {
+  /* Dark theme (default) */
+  --theme-void: #050506;
+  --theme-midnight: #0a0a0c;
+  --theme-surface: #111114;
+  --theme-elevated: #18181c;
+  --theme-hover: #1f1f24;
+  --theme-backdrop: #050506;
 
-  /* Warm amber accent */
-  --color-amber: #e9a23b;
-  --color-amber-glow: #e9a23b40;
-  --color-amber-soft: #e9a23b20;
+  --theme-amber: #e9a23b;
+  --theme-amber-glow: #e9a23b40;
+  --theme-amber-soft: #e9a23b20;
 
-  /* Status colors */
-  --color-sage: #7cb587;
-  --color-coral: #e07a5f;
-  --color-mist: #64748b;
+  --theme-text: #f4f4f5;
+  --theme-text-secondary: #a1a1aa;
+  --theme-text-muted: #52525b;
 
-  /* Text hierarchy */
-  --color-text: #f4f4f5;
-  --color-text-secondary: #a1a1aa;
-  --color-text-muted: #52525b;
+  --theme-line: #27272a;
+  --theme-line-subtle: #1c1c1f;
 
-  /* Borders */
-  --color-line: #27272a;
-  --color-line-subtle: #1c1c1f;
-
-  /* Typography */
-  --font-display: var(--font-display), Georgia, serif;
-  --font-body: var(--font-body), system-ui, sans-serif;
+  --theme-sage: #7cb587;
+  --theme-coral: #e07a5f;
+  --theme-mist: #64748b;
 }
 
-html {
+/* Light theme overrides */
+html[data-theme="light"] {
+  --theme-void: #f8fafc;
+  --theme-midnight: #f1f5f9;
+  --theme-surface: #ffffff;
+  --theme-elevated: #f1f5f9;
+  --theme-hover: #e2e8f0;
+  --theme-backdrop: rgba(0, 0, 0, 0.5);
+
+  --theme-amber: #d97706;
+  --theme-amber-glow: #d9770640;
+  --theme-amber-soft: #d9770615;
+
+  --theme-text: #0f172a;
+  --theme-text-secondary: #475569;
+  --theme-text-muted: #94a3b8;
+
+  --theme-line: #e2e8f0;
+  --theme-line-subtle: #f1f5f9;
+
+  --theme-sage: #16a34a;
+  --theme-coral: #dc2626;
+  --theme-mist: #64748b;
+}
+
+/* Tailwind theme - references the CSS variables */
+@theme {
+  --font-display: var(--font-display), Georgia, serif;
+  --font-body: var(--font-body), system-ui, sans-serif;
+
+  --color-void: var(--theme-void);
+  --color-midnight: var(--theme-midnight);
+  --color-surface: var(--theme-surface);
+  --color-elevated: var(--theme-elevated);
+  --color-hover: var(--theme-hover);
+  --color-backdrop: var(--theme-backdrop);
+
+  --color-amber: var(--theme-amber);
+  --color-amber-glow: var(--theme-amber-glow);
+  --color-amber-soft: var(--theme-amber-soft);
+  --color-accent: var(--theme-amber);
+
+  --color-text: var(--theme-text);
+  --color-text-secondary: var(--theme-text-secondary);
+  --color-text-muted: var(--theme-text-muted);
+
+  --color-line: var(--theme-line);
+  --color-line-subtle: var(--theme-line-subtle);
+
+  --color-sage: var(--theme-sage);
+  --color-coral: var(--theme-coral);
+  --color-mist: var(--theme-mist);
+}
+
+/* Color scheme */
+html, html[data-theme="dark"] {
   color-scheme: dark;
 }
 
+html[data-theme="light"] {
+  color-scheme: light;
+}
+
 body {
-  background: var(--color-void);
-  color: var(--color-text);
+  background: var(--theme-void);
+  color: var(--theme-text);
   font-family: var(--font-body);
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* Noise texture overlay */
@@ -50,6 +104,10 @@ body {
   z-index: 9999;
   opacity: 0.035;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+}
+
+html[data-theme="light"] .noise {
+  opacity: 0.015;
 }
 
 /* Custom scrollbar */
@@ -63,12 +121,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-line);
+  background: var(--theme-line);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
+  background: var(--theme-text-muted);
 }
 
 /* Staggered animation utilities */
@@ -98,34 +156,35 @@ body {
 
 /* Glass effect */
 .glass {
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.03) 0%,
-    rgba(255, 255, 255, 0.01) 100%
-  );
+  background: var(--theme-surface);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--color-line-subtle);
+  border: 1px solid var(--theme-line-subtle);
+}
+
+html[data-theme="light"] .glass {
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.03);
 }
 
 /* Glow effects */
 .glow-amber {
   box-shadow:
-    0 0 20px var(--color-amber-glow),
-    0 0 40px var(--color-amber-soft);
+    0 0 20px var(--theme-amber-glow),
+    0 0 40px var(--theme-amber-soft);
 }
 
 /* Focus states */
 input:focus,
 textarea:focus {
   outline: none;
-  border-color: var(--color-amber) !important;
-  box-shadow: 0 0 0 2px var(--color-amber-soft);
+  border-color: var(--theme-amber) !important;
+  box-shadow: 0 0 0 2px var(--theme-amber-soft);
 }
 
 /* Selection */
 ::selection {
-  background: var(--color-amber);
-  color: var(--color-void);
+  background: var(--theme-amber);
+  color: white;
 }
 
 /* Completion celebration animation */
@@ -220,3 +279,73 @@ textarea:focus {
 .sparkle-2 { animation-delay: 0.2s; }
 .sparkle-3 { animation-delay: 0.3s; }
 .sparkle-4 { animation-delay: 0.15s; }
+
+/* ============================================
+   Light Mode Overrides for Tailwind Utilities
+   ============================================ */
+html[data-theme="light"] {
+  /* Background colors */
+  .bg-void { background-color: #f8fafc !important; }
+  .bg-midnight { background-color: #f1f5f9 !important; }
+  .bg-surface { background-color: #ffffff !important; }
+  .bg-elevated { background-color: #f1f5f9 !important; }
+  .bg-hover { background-color: #e2e8f0 !important; }
+  .bg-amber { background-color: #d97706 !important; }
+  .bg-line { background-color: #e2e8f0 !important; }
+  .bg-line-subtle { background-color: #f1f5f9 !important; }
+
+  /* Background with opacity */
+  .bg-void\/80 { background-color: rgba(248, 250, 252, 0.8) !important; }
+  .bg-void\/50 { background-color: rgba(248, 250, 252, 0.5) !important; }
+  .bg-surface\/50 { background-color: rgba(255, 255, 255, 0.5) !important; }
+  .bg-elevated\/50 { background-color: rgba(241, 245, 249, 0.5) !important; }
+  .bg-amber\/5 { background-color: rgba(217, 119, 6, 0.05) !important; }
+  .bg-amber\/10 { background-color: rgba(217, 119, 6, 0.1) !important; }
+  .bg-amber\/20 { background-color: rgba(217, 119, 6, 0.2) !important; }
+  .bg-sage\/5 { background-color: rgba(22, 163, 74, 0.05) !important; }
+  .bg-sage\/10 { background-color: rgba(22, 163, 74, 0.1) !important; }
+  .bg-coral\/10 { background-color: rgba(220, 38, 38, 0.1) !important; }
+
+  /* Text colors */
+  .text-text { color: #0f172a !important; }
+  .text-text-secondary { color: #475569 !important; }
+  .text-text-muted { color: #94a3b8 !important; }
+  .text-amber { color: #d97706 !important; }
+  .text-sage { color: #16a34a !important; }
+  .text-coral { color: #dc2626 !important; }
+  .text-mist { color: #64748b !important; }
+  .text-void { color: #f8fafc !important; }
+
+  /* Border colors */
+  .border-line { border-color: #e2e8f0 !important; }
+  .border-line-subtle { border-color: #f1f5f9 !important; }
+  .border-amber { border-color: #d97706 !important; }
+  .border-amber\/30 { border-color: rgba(217, 119, 6, 0.3) !important; }
+
+  /* Ring colors */
+  .ring-amber\/30 { --tw-ring-color: rgba(217, 119, 6, 0.3) !important; }
+  .ring-offset-surface { --tw-ring-offset-color: #ffffff !important; }
+
+  /* Gradients */
+  .from-void { --tw-gradient-from: #f8fafc !important; }
+  .via-midnight { --tw-gradient-via: #f1f5f9 !important; }
+  .to-void { --tw-gradient-to: #f8fafc !important; }
+  .from-amber\/60 { --tw-gradient-from: rgba(217, 119, 6, 0.6) !important; }
+
+  /* Hover states */
+  .hover\:bg-elevated:hover { background-color: #f1f5f9 !important; }
+  .hover\:bg-elevated\/50:hover { background-color: rgba(241, 245, 249, 0.5) !important; }
+  .hover\:bg-hover:hover { background-color: #e2e8f0 !important; }
+  .hover\:bg-amber\/90:hover { background-color: rgba(217, 119, 6, 0.9) !important; }
+  .hover\:bg-coral\/10:hover { background-color: rgba(220, 38, 38, 0.1) !important; }
+  .hover\:text-text:hover { color: #0f172a !important; }
+  .hover\:text-text-secondary:hover { color: #475569 !important; }
+  .hover\:text-amber:hover { color: #d97706 !important; }
+  .hover\:text-coral:hover { color: #dc2626 !important; }
+  .hover\:border-line:hover { border-color: #e2e8f0 !important; }
+  .hover\:border-line-subtle:hover { border-color: #f1f5f9 !important; }
+  .hover\:border-text-muted:hover { border-color: #94a3b8 !important; }
+
+  /* Placeholder colors */
+  .placeholder\:text-text-muted::placeholder { color: #94a3b8 !important; }
+}

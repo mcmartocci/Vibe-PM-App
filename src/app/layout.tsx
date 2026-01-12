@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, Outfit } from "next/font/google";
 import "./globals.css";
+import { ThemeProvider } from "@/contexts/ThemeContext";
 
 const fraunces = Fraunces({
   variable: "--font-display",
@@ -25,10 +26,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" suppressHydrationWarning>
       <body className={`${fraunces.variable} ${outfit.variable} antialiased`}>
-        <div className="noise" />
-        {children}
+        <ThemeProvider>
+          <div className="noise" />
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );

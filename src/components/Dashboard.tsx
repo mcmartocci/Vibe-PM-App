@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Folder, Pencil } from 'lucide-react';
+import { Folder, Pencil, Settings } from 'lucide-react';
 import { Project, Task } from '@/types';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { generateId } from '@/lib/utils';
@@ -11,6 +11,7 @@ import { MoveTaskModal } from './kanban/MoveTaskModal';
 import { TaskDetailModal } from './kanban/TaskDetailModal';
 import { TodoList } from './todo/TodoList';
 import { NotesPanel } from './notes/NotesPanel';
+import { SettingsPanel } from './settings/SettingsPanel';
 
 const DEFAULT_PROJECT: Project = {
   id: 'default',
@@ -28,6 +29,7 @@ export function Dashboard() {
   const headerInputRef = useRef<HTMLInputElement>(null);
   const [taskToMove, setTaskToMove] = useState<Task | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Migrate old tasks to default project on first load
   useEffect(() => {
@@ -296,9 +298,9 @@ export function Dashboard() {
 
         <div className="relative flex-1 flex flex-col p-8 lg:p-10">
           {/* Header */}
-          <header className="mb-8 animate-in" style={{ animationDelay: '0ms' }}>
+          <header className="mb-8 animate-in flex items-start justify-between" style={{ animationDelay: '0ms' }}>
             {activeProject ? (
-              <>
+              <div>
                 <div className="flex items-center gap-3 group">
                   <div
                     className="w-3 h-3 rounded-full"
@@ -337,13 +339,22 @@ export function Dashboard() {
                   )}
                 </div>
                 <div className="mt-2 h-px w-24 bg-gradient-to-r from-amber/60 to-transparent" />
-              </>
+              </div>
             ) : (
               <div className="flex items-center gap-3 text-text-muted">
                 <Folder size={24} />
                 <span className="text-lg">Select or create a project</span>
               </div>
             )}
+
+            {/* Settings Button */}
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-2.5 rounded-xl text-text-muted hover:text-text hover:bg-elevated border border-transparent hover:border-line transition-all duration-150"
+              title="Settings"
+            >
+              <Settings size={20} />
+            </button>
           </header>
 
           {/* Main Content */}
@@ -407,6 +418,12 @@ export function Dashboard() {
           onUpdateDescription={handleUpdateTaskDescription}
         />
       )}
+
+      {/* Settings Panel */}
+      <SettingsPanel
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+      />
     </div>
   );
 }
