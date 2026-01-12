@@ -2,17 +2,26 @@
 
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { X, GripVertical } from 'lucide-react';
-import { Task } from '@/types';
+import { X, GripVertical, Flag } from 'lucide-react';
+import { Task, TaskPriority } from '@/types';
 import { cn } from '@/lib/utils';
 
 interface TaskCardProps {
   task: Task;
   onDelete: (id: string) => void;
+  onUpdatePriority: (id: string, priority: TaskPriority) => void;
   isDragOverlay?: boolean;
 }
 
-export function TaskCard({ task, onDelete, isDragOverlay }: TaskCardProps) {
+const priorityConfig: Record<TaskPriority, { color: string; bg: string; label: string }> = {
+  low: { color: 'text-[#64748b]', bg: 'bg-[#64748b]/15', label: 'Low' },
+  medium: { color: 'text-[#e9a23b]', bg: 'bg-[#e9a23b]/15', label: 'Med' },
+  high: { color: 'text-[#e07a5f]', bg: 'bg-[#e07a5f]/15', label: 'High' },
+};
+
+const priorityOrder: TaskPriority[] = ['low', 'medium', 'high'];
+
+export function TaskCard({ task, onDelete, onUpdatePriority, isDragOverlay }: TaskCardProps) {
   const {
     attributes,
     listeners,
@@ -26,6 +35,16 @@ export function TaskCard({ task, onDelete, isDragOverlay }: TaskCardProps) {
     transform: CSS.Transform.toString(transform),
     transition,
   };
+
+  const cyclePriority = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const currentPriority = task.priority || 'medium';
+    const currentIndex = priorityOrder.indexOf(currentPriority);
+    const nextIndex = (currentIndex + 1) % priorityOrder.length;
+    onUpdatePriority(task.id, priorityOrder[nextIndex]);
+  };
+
+  const config = priorityConfig[task.priority] || priorityConfig.medium;
 
   return (
     <div
@@ -50,9 +69,16 @@ export function TaskCard({ task, onDelete, isDragOverlay }: TaskCardProps) {
       </div>
 
       <div className="flex items-start justify-between gap-3 pl-3">
-        <h3 className="text-text text-sm font-medium leading-relaxed flex-1">
-          {task.title}
-        </h3>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-text text-sm font-medium leading-relaxed">
+            {task.title}
+          </h3>
+          {task.description && (
+            <p className="text-text-secondary text-xs mt-1.5 line-clamp-2 leading-relaxed">
+              {task.description}
+            </p>
+          )}
+        </div>
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -69,11 +95,23 @@ export function TaskCard({ task, onDelete, isDragOverlay }: TaskCardProps) {
         </button>
       </div>
 
-      {task.description && (
-        <p className="text-text-secondary text-xs mt-2 pl-3 line-clamp-2 leading-relaxed">
-          {task.description}
-        </p>
-      )}
+      {/* Priority Badge - Clickable */}
+      <div className="mt-3 pl-3">
+        <button
+          onClick={cyclePriority}
+          className={cn(
+            'inline-flex items-center gap-1.5 px-2 py-1 rounded-md',
+            'text-xs font-medium',
+            'transition-all duration-150',
+            config.bg,
+            config.color,
+            'hover:opacity-80'
+          )}
+        >
+          <Flag size={10} />
+          {config.label}
+        </button>
+      </div>
 
       {/* Subtle accent line */}
       <div className="absolute bottom-0 left-4 right-4 h-px bg-gradient-to-r from-transparent via-line-subtle to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />

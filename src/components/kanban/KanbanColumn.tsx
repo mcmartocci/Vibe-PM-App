@@ -2,7 +2,7 @@
 
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { Task, TaskStatus, ColumnConfig } from '@/types';
+import { Task, TaskStatus, TaskPriority, ColumnConfig } from '@/types';
 import { TaskCard } from './TaskCard';
 import { AddTaskForm } from './AddTaskForm';
 import { cn } from '@/lib/utils';
@@ -10,8 +10,9 @@ import { cn } from '@/lib/utils';
 interface KanbanColumnProps {
   column: ColumnConfig;
   tasks: Task[];
-  onAddTask: (title: string, status: TaskStatus) => void;
+  onAddTask: (title: string, status: TaskStatus, priority: TaskPriority) => void;
   onDeleteTask: (id: string) => void;
+  onUpdatePriority: (id: string, priority: TaskPriority) => void;
   index: number;
 }
 
@@ -30,7 +31,7 @@ const statusConfig: Record<TaskStatus, { color: string; glow: string }> = {
   },
 };
 
-export function KanbanColumn({ column, tasks, onAddTask, onDeleteTask, index }: KanbanColumnProps) {
+export function KanbanColumn({ column, tasks, onAddTask, onDeleteTask, onUpdatePriority, index }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
   });
@@ -70,12 +71,12 @@ export function KanbanColumn({ column, tasks, onAddTask, onDeleteTask, index }: 
               className="animate-in"
               style={{ animationDelay: `${(index * 100) + (i * 50)}ms` }}
             >
-              <TaskCard task={task} onDelete={onDeleteTask} />
+              <TaskCard task={task} onDelete={onDeleteTask} onUpdatePriority={onUpdatePriority} />
             </div>
           ))}
         </SortableContext>
 
-        <AddTaskForm onAdd={(title) => onAddTask(title, column.id)} />
+        <AddTaskForm onAdd={(title, priority) => onAddTask(title, column.id, priority)} />
       </div>
     </div>
   );

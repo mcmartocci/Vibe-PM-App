@@ -1,22 +1,31 @@
 'use client';
 
 import { useState } from 'react';
-import { Plus, X, ArrowRight } from 'lucide-react';
+import { Plus, X, ArrowRight, Flag } from 'lucide-react';
+import { TaskPriority } from '@/types';
 import { cn } from '@/lib/utils';
 
 interface AddTaskFormProps {
-  onAdd: (title: string) => void;
+  onAdd: (title: string, priority: TaskPriority) => void;
 }
+
+const priorities: { value: TaskPriority; label: string; color: string }[] = [
+  { value: 'low', label: 'Low', color: 'text-[#64748b]' },
+  { value: 'medium', label: 'Med', color: 'text-[#e9a23b]' },
+  { value: 'high', label: 'High', color: 'text-[#e07a5f]' },
+];
 
 export function AddTaskForm({ onAdd }: AddTaskFormProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [title, setTitle] = useState('');
+  const [priority, setPriority] = useState<TaskPriority>('medium');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (title.trim()) {
-      onAdd(title.trim());
+      onAdd(title.trim(), priority);
       setTitle('');
+      setPriority('medium');
       setIsOpen(false);
     }
   };
@@ -56,6 +65,28 @@ export function AddTaskForm({ onAdd }: AddTaskFormProps) {
           'transition-all duration-200'
         )}
       />
+
+      {/* Priority Selector */}
+      <div className="flex items-center gap-1 px-1">
+        <Flag size={14} className="text-text-muted mr-1" />
+        {priorities.map((p) => (
+          <button
+            key={p.value}
+            type="button"
+            onClick={() => setPriority(p.value)}
+            className={cn(
+              'px-2.5 py-1 rounded-lg text-xs font-medium',
+              'transition-all duration-150',
+              priority === p.value
+                ? cn('bg-elevated', p.color)
+                : 'text-text-muted hover:text-text-secondary'
+            )}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
       <div className="flex items-center gap-2">
         <button
           type="submit"
@@ -77,6 +108,7 @@ export function AddTaskForm({ onAdd }: AddTaskFormProps) {
           onClick={() => {
             setIsOpen(false);
             setTitle('');
+            setPriority('medium');
           }}
           className={cn(
             'p-2.5 rounded-xl',
