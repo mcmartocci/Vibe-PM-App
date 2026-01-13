@@ -6,6 +6,12 @@ import Link from 'next/link';
 
 export default async function AdminPage() {
   const supabase = await createClient();
+
+  // If Supabase isn't configured, redirect to dashboard
+  if (!supabase) {
+    redirect('/dashboard');
+  }
+
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {

@@ -21,7 +21,12 @@
       "Bash(git commit:*)",
       "Bash(git config:*)",
       "Bash(git remote add:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(/opt/homebrew/bin/npm install @supabase/supabase-js @supabase/ssr)",
+      "Bash(source ~/.zshrc)",
+      "Bash(source ~/.bashrc)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run build:*)"
     ]
   }
 }

@@ -4,6 +4,12 @@ import { LoginForm } from '@/components/auth/LoginForm';
 
 export default async function LoginPage() {
   const supabase = await createClient();
+
+  // If Supabase isn't configured, redirect to dashboard (local-only mode)
+  if (!supabase) {
+    redirect('/dashboard');
+  }
+
   const { data: { user } } = await supabase.auth.getUser();
 
   // If already logged in, redirect to dashboard
