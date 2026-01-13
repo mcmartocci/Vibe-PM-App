@@ -3,7 +3,8 @@
 import {
   DndContext,
   DragEndEvent,
-  DragOverEvent,
+  DragStartEvent,
+  DragOverlay,
   PointerSensor,
   KeyboardSensor,
   useSensor,
@@ -11,10 +12,12 @@ import {
   closestCorners,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Task, TaskStatus, TaskPriority, ColumnConfig } from '@/types';
 import { generateId } from '@/lib/utils';
 import { KanbanColumn } from './KanbanColumn';
+import { TaskCard } from './TaskCard';
 import { PriorityFilter } from './PriorityFilter';
 
 const COLUMNS: ColumnConfig[] = [
@@ -32,11 +35,19 @@ interface KanbanBoardProps {
 
 export function KanbanBoard({ tasks = [], onTasksChange, onMoveClick, onTaskClick }: KanbanBoardProps) {
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority[]>([]);
+  const [activeTask, setActiveTask] = useState<Task | null>(null);
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  // Local optimistic state for instant visual updates
+  const [localTasks, setLocalTasks] = useState<Task[]>(tasks || []);
 
-  const safeTasks = tasks || [];
+  // Sync local state when parent tasks change
+  useEffect(() => {
+    setLocalTasks(tasks || []);
+  }, [tasks]);
+
   const filteredTasks = priorityFilter.length === 0
-    ? safeTasks
-    : safeTasks.filter(t => priorityFilter.includes(t.priority || 'medium'));
+    ? localTasks
+    : localTasks.filter(t => priorityFilter.includes(t.priority || 'medium'));
 
   // Sort by priority: high -> medium -> low
   const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
@@ -59,81 +70,60 @@ export function KanbanBoard({ tasks = [], onTasksChange, onMoveClick, onTaskClic
     const column = COLUMNS.find(c => c.id === id);
     if (column) return column.id;
 
-    const task = safeTasks.find(t => t.id === id);
+    const task = localTasks.find(t => t.id === id);
     if (task) return task.status;
 
     return null;
   };
 
-  const handleDragOver = (event: DragOverEvent) => {
-    const { active, over } = event;
-    if (!over) return;
+  const handleDragStart = (event: DragStartEvent) => {
+    const task = localTasks.find(t => t.id === event.active.id);
+    setActiveTask(task || null);
 
-    const activeId = active.id as string;
-    const overId = over.id as string;
-
-    const task = safeTasks.find(t => t.id === activeId);
-    if (!task) return;
-
-    const overColumnId = findColumnId(overId);
-    if (overColumnId && task.status !== overColumnId) {
-      const oldStatus = task.status;
-      onTasksChange(
-        safeTasks.map(t =>
-          t.id === activeId
-            ? {
-                ...t,
-                status: overColumnId,
-                changelog: [
-                  ...(t.changelog || []),
-                  {
-                    id: generateId(),
-                    type: 'status' as const,
-                    timestamp: Date.now(),
-                    from: oldStatus,
-                    to: overColumnId,
-                  },
-                ],
-              }
-            : t
-        )
-      );
+    // Capture the original card width
+    if (event.active.rect.current.initial) {
+      setDragWidth(event.active.rect.current.initial.width);
     }
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
+    setActiveTask(null);
+
     const { active, over } = event;
     if (!over) return;
 
     const activeId = active.id as string;
     const overId = over.id as string;
 
-    const task = safeTasks.find(t => t.id === activeId);
+    const task = localTasks.find(t => t.id === activeId);
     if (!task) return;
 
     const overColumnId = findColumnId(overId);
     if (overColumnId && task.status !== overColumnId) {
       const oldStatus = task.status;
-      onTasksChange(
-        safeTasks.map(t =>
-          t.id === activeId
-            ? {
-                ...t,
-                status: overColumnId,
-                changelog: [
-                  ...(t.changelog || []),
-                  {
-                    id: generateId(),
-                    type: 'status' as const,
-                    timestamp: Date.now(),
-                    from: oldStatus,
-                    to: overColumnId,
-                  },
-                ],
-              }
-            : t
-        )
+      const updatedTasks = localTasks.map(t =>
+        t.id === activeId
+          ? {
+              ...t,
+              status: overColumnId,
+              changelog: [
+                ...(t.changelog || []),
+                {
+                  id: generateId(),
+                  type: 'status' as const,
+                  timestamp: Date.now(),
+                  from: oldStatus,
+                  to: overColumnId,
+                },
+              ],
+            }
+          : t
       );
+
+      // Update local state immediately for instant visual feedback
+      setLocalTasks(updatedTasks);
+      // Then sync with parent/database
+      onTasksChange(updatedTasks);
     }
   };
 
@@ -145,23 +135,23 @@ export function KanbanBoard({ tasks = [], onTasksChange, onMoveClick, onTaskClic
       status,
       priority,
       createdAt: now,
-      order: safeTasks.filter(t => t.status === status).length,
+      order: localTasks.filter(t => t.status === status).length,
       changelog: [{
         id: generateId(),
         type: 'created',
         timestamp: now,
       }],
     };
-    onTasksChange([...safeTasks, newTask]);
+    onTasksChange([...localTasks, newTask]);
   };
 
   const handleDeleteTask = (id: string) => {
-    onTasksChange(safeTasks.filter(t => t.id !== id));
+    onTasksChange(localTasks.filter(t => t.id !== id));
   };
 
   const handleUpdatePriority = (id: string, priority: TaskPriority) => {
     onTasksChange(
-      safeTasks.map(t => {
+      localTasks.map(t => {
         if (t.id === id) {
           const oldPriority = t.priority || 'medium';
           return {
@@ -191,7 +181,7 @@ export function KanbanBoard({ tasks = [], onTasksChange, onMoveClick, onTaskClic
       <DndContext
         sensors={sensors}
         collisionDetection={closestCorners}
-        onDragOver={handleDragOver}
+        onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
         <div className="grid grid-cols-3 gap-6 flex-1 min-h-0">
@@ -208,6 +198,21 @@ export function KanbanBoard({ tasks = [], onTasksChange, onMoveClick, onTaskClic
             />
           ))}
         </div>
+        {typeof document !== 'undefined' && createPortal(
+          <DragOverlay>
+            {activeTask ? (
+              <div style={{ width: dragWidth ?? 'auto' }}>
+                <TaskCard
+                  task={activeTask}
+                  onDelete={() => {}}
+                  onUpdatePriority={() => {}}
+                  isDragOverlay
+                />
+              </div>
+            ) : null}
+          </DragOverlay>,
+          document.body
+        )}
       </DndContext>
     </div>
   );

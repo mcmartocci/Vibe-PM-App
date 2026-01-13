@@ -1,38 +1,27 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
 import { FileText, Save } from 'lucide-react';
-import { Notes } from '@/types';
-import { useLocalStorage } from '@/hooks/useLocalStorage';
+import { useNotes } from '@/hooks/useNotes';
 import { cn } from '@/lib/utils';
+import { useState, useEffect } from 'react';
 
 export function NotesPanel() {
-  const [notes, setNotes, isHydrated] = useLocalStorage<Notes>('pm-notes', {
-    content: '',
-    updatedAt: Date.now(),
-  });
+  const { content, loading, updateNote } = useNotes();
   const [localContent, setLocalContent] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    if (isHydrated) {
-      setLocalContent(notes.content);
+    if (!loading) {
+      setLocalContent(content);
     }
-  }, [isHydrated, notes.content]);
+  }, [loading, content]);
 
   const handleChange = (value: string) => {
     setLocalContent(value);
     setIsSaving(true);
-
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-
-    timeoutRef.current = setTimeout(() => {
-      setNotes({ content: value, updatedAt: Date.now() });
-      setIsSaving(false);
-    }, 500);
+    updateNote(value);
+    // Reset saving indicator after debounce
+    setTimeout(() => setIsSaving(false), 600);
   };
 
   return (
@@ -57,7 +46,7 @@ export function NotesPanel() {
       </div>
 
       {/* Textarea */}
-      {!isHydrated ? (
+      {loading ? (
         <div className="flex-1 bg-elevated/50 rounded-xl animate-pulse-soft" />
       ) : (
         <div className="flex-1 relative">

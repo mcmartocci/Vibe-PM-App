@@ -2,7 +2,7 @@
 
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { X, GripVertical, Flag, FolderInput, Check, Sparkles } from 'lucide-react';
+import { X, GripVertical, Flag, FolderInput, Check } from 'lucide-react';
 import { Task, TaskPriority } from '@/types';
 import { cn } from '@/lib/utils';
 
@@ -33,11 +33,13 @@ export function TaskCard({ task, onDelete, onUpdatePriority, onMoveClick, onTask
     isDragging,
   } = useSortable({ id: task.id });
 
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    willChange: isDragging ? 'transform' : undefined,
-  };
+  const style: React.CSSProperties = isDragOverlay
+    ? {}
+    : {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.3 : 1,
+      };
 
   const cyclePriority = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -65,12 +67,12 @@ export function TaskCard({ task, onDelete, onUpdatePriority, onMoveClick, onTask
         'group relative mb-3 last:mb-0',
         'bg-elevated border border-line-subtle rounded-xl p-4',
         'cursor-grab active:cursor-grabbing',
-        !isDragging && 'transition-colors duration-200',
-        'hover:border-line hover:bg-hover',
-        !isDragging && 'hover:shadow-[0_4px_20px_rgba(0,0,0,0.3)]',
-        isDragging && 'shadow-2xl border-amber/40 z-50 rotate-2 scale-105',
-        isComplete && !isDragging && 'border-sage/30 completion-card',
-        isComplete && isDragging && 'border-sage/30'
+        !isDragging && !isDragOverlay && 'transition-colors duration-200',
+        !isDragging && !isDragOverlay && 'hover:border-line hover:bg-hover',
+        !isDragging && !isDragOverlay && 'hover:shadow-[0_4px_20px_rgba(0,0,0,0.3)]',
+        isDragOverlay && 'shadow-2xl border-amber/40 rotate-2 scale-105 cursor-grabbing',
+        isComplete && !isDragging && !isDragOverlay && 'border-sage/30 completion-card',
+        isComplete && isDragOverlay && 'border-sage/30'
       )}
       onClick={handleCardClick}
       {...attributes}

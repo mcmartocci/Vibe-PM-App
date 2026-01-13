@@ -1,38 +1,32 @@
 'use client';
 
 import { useState } from 'react';
-import { Plus, Sparkles } from 'lucide-react';
-import { TodoItem as TodoItemType } from '@/types';
-import { useLocalStorage } from '@/hooks/useLocalStorage';
-import { generateId, cn } from '@/lib/utils';
+import { Plus, Sparkles, Loader2 } from 'lucide-react';
+import { useTodos } from '@/hooks/useTodos';
+import { cn } from '@/lib/utils';
 import { TodoItem } from './TodoItem';
 
 export function TodoList() {
-  const [todos, setTodos, isHydrated] = useLocalStorage<TodoItemType[]>('pm-todos', []);
+  const { todos, loading, createTodo, toggleTodo, deleteTodo } = useTodos();
   const [newTodo, setNewTodo] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
 
-  const handleAdd = (e: React.FormEvent) => {
+  const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newTodo.trim()) {
-      const todo: TodoItemType = {
-        id: generateId(),
-        text: newTodo.trim(),
-        completed: false,
-        createdAt: Date.now(),
-      };
-      setTodos(prev => [...prev, todo]);
+    if (newTodo.trim() && !isAdding) {
+      setIsAdding(true);
+      await createTodo(newTodo.trim());
       setNewTodo('');
+      setIsAdding(false);
     }
   };
 
-  const handleToggle = (id: string) => {
-    setTodos(prev =>
-      prev.map(t => (t.id === id ? { ...t, completed: !t.completed } : t))
-    );
+  const handleToggle = async (id: string) => {
+    await toggleTodo(id);
   };
 
-  const handleDelete = (id: string) => {
-    setTodos(prev => prev.filter(t => t.id !== id));
+  const handleDelete = async (id: string) => {
+    await deleteTodo(id);
   };
 
   const pendingCount = todos.filter(t => !t.completed).length;
@@ -64,16 +58,18 @@ export function TodoList() {
           value={newTodo}
           onChange={(e) => setNewTodo(e.target.value)}
           placeholder="Add a quick task..."
+          disabled={isAdding}
           className={cn(
             'flex-1 px-3 py-2 rounded-lg text-sm',
             'bg-elevated/50 border border-line-subtle',
             'text-text placeholder:text-text-muted',
+            'disabled:opacity-50',
             'transition-all duration-200'
           )}
         />
         <button
           type="submit"
-          disabled={!newTodo.trim()}
+          disabled={!newTodo.trim() || isAdding}
           className={cn(
             'p-2 rounded-lg',
             'bg-amber/10 text-amber',
@@ -82,13 +78,13 @@ export function TodoList() {
             'transition-all duration-150'
           )}
         >
-          <Plus size={18} />
+          {isAdding ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
         </button>
       </form>
 
       {/* Todo List */}
       <div className="flex-1 overflow-y-auto space-y-1 pr-1">
-        {!isHydrated ? (
+        {loading ? (
           <div className="space-y-2">
             <div className="h-8 bg-elevated/50 rounded-lg animate-pulse-soft" />
             <div className="h-8 bg-elevated/50 rounded-lg animate-pulse-soft" style={{ animationDelay: '100ms' }} />
@@ -110,7 +106,7 @@ export function TodoList() {
                 style={{ animationDelay: `${i * 30}ms` }}
               >
                 <TodoItem
-                  todo={todo}
+                  todo={{ id: todo.id, text: todo.text, completed: todo.completed, createdAt: new Date(todo.created_at).getTime() }}
                   onToggle={handleToggle}
                   onDelete={handleDelete}
                 />
@@ -126,7 +122,7 @@ export function TodoList() {
                 {todos.filter(t => t.completed).map((todo) => (
                   <TodoItem
                     key={todo.id}
-                    todo={todo}
+                    todo={{ id: todo.id, text: todo.text, completed: todo.completed, createdAt: new Date(todo.created_at).getTime() }}
                     onToggle={handleToggle}
                     onDelete={handleDelete}
                   />

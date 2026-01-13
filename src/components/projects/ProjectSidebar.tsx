@@ -9,7 +9,7 @@ interface ProjectSidebarProps {
   projects: Project[];
   activeProjectId: string | null;
   onSelectProject: (id: string) => void;
-  onCreateProject: (project: Project) => void;
+  onCreateProject: (project: Project) => Promise<void>;
   onDeleteProject: (id: string) => void;
   onRenameProject: (id: string, name: string) => void;
 }
@@ -34,25 +34,35 @@ export function ProjectSidebar({
 }: ProjectSidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [selectedColor, setSelectedColor] = useState(PROJECT_COLORS[0]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newProjectName.trim()) {
-      const newProject: Project = {
-        id: generateId(),
-        name: newProjectName.trim(),
-        color: selectedColor,
-        tasks: [],
-        createdAt: Date.now(),
-      };
-      onCreateProject(newProject);
-      setNewProjectName('');
-      setIsCreating(false);
-      setSelectedColor(PROJECT_COLORS[Math.floor(Math.random() * PROJECT_COLORS.length)]);
+    if (newProjectName.trim() && !isSubmitting) {
+      setError(null);
+      setIsSubmitting(true);
+      try {
+        const newProject: Project = {
+          id: generateId(),
+          name: newProjectName.trim(),
+          color: selectedColor,
+          tasks: [],
+          createdAt: Date.now(),
+        };
+        await onCreateProject(newProject);
+        setNewProjectName('');
+        setIsCreating(false);
+        setSelectedColor(PROJECT_COLORS[Math.floor(Math.random() * PROJECT_COLORS.length)]);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to create project');
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -217,7 +227,7 @@ export function ProjectSidebar({
                 'focus:outline-none focus:border-amber'
               )}
             />
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
               {PROJECT_COLORS.map((color) => (
                 <button
                   key={color}
@@ -225,16 +235,24 @@ export function ProjectSidebar({
                   onClick={() => setSelectedColor(color)}
                   className={cn(
                     'w-6 h-6 rounded-full transition-all duration-150',
-                    selectedColor === color && 'ring-2 ring-offset-2 ring-offset-surface ring-white/30'
+                    selectedColor === color
+                      ? 'ring-2 ring-offset-2 ring-offset-surface scale-110'
+                      : 'opacity-60 hover:opacity-100 hover:scale-105'
                   )}
-                  style={{ backgroundColor: color }}
+                  style={{
+                    backgroundColor: color,
+                    boxShadow: selectedColor === color ? `0 0 0 2px ${color}` : undefined
+                  }}
                 />
               ))}
             </div>
+            {error && (
+              <p className="text-xs text-coral">{error}</p>
+            )}
             <div className="flex gap-2">
               <button
                 type="submit"
-                disabled={!newProjectName.trim()}
+                disabled={!newProjectName.trim() || isSubmitting}
                 className={cn(
                   'flex-1 px-3 py-2 rounded-lg text-sm font-medium',
                   'bg-amber text-void',
@@ -243,17 +261,20 @@ export function ProjectSidebar({
                   'transition-all duration-150'
                 )}
               >
-                Create
+                {isSubmitting ? 'Creating...' : 'Create'}
               </button>
               <button
                 type="button"
+                disabled={isSubmitting}
                 onClick={() => {
                   setIsCreating(false);
                   setNewProjectName('');
+                  setError(null);
                 }}
                 className={cn(
                   'p-2 rounded-lg',
                   'text-text-muted hover:text-text-secondary hover:bg-elevated',
+                  'disabled:opacity-40',
                   'transition-all duration-150'
                 )}
               >

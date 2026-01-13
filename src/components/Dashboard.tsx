@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { Folder, Pencil, Settings } from 'lucide-react';
-import { Project, Task } from '@/types';
-import { useLocalStorage } from '@/hooks/useLocalStorage';
-import { generateId } from '@/lib/utils';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { Folder, Pencil, Settings, LogOut } from 'lucide-react';
+import { Task as LegacyTask, TaskStatus, TaskPriority, Project as LegacyProject } from '@/types';
+import { useAuth } from '@/hooks/useAuth';
+import { useProjects, Project } from '@/hooks/useProjects';
+import { useTasks, Task, TaskChangelog } from '@/hooks/useTasks';
 import { ProjectSidebar } from './projects/ProjectSidebar';
 import { KanbanBoard } from './kanban/KanbanBoard';
 import { MoveTaskModal } from './kanban/MoveTaskModal';
@@ -13,73 +14,126 @@ import { TodoList } from './todo/TodoList';
 import { NotesPanel } from './notes/NotesPanel';
 import { SettingsPanel } from './settings/SettingsPanel';
 
-const DEFAULT_PROJECT: Project = {
-  id: 'default',
-  name: 'My First Project',
-  color: '#e9a23b',
-  tasks: [],
-  createdAt: Date.now(),
-};
+// Transform Supabase task to legacy format for child components
+function transformTask(task: Task, changelog: TaskChangelog[] = []): LegacyTask {
+  return {
+    id: task.id,
+    title: task.title,
+    description: task.description || undefined,
+    status: task.status as TaskStatus,
+    priority: (task.priority || 'medium') as TaskPriority,
+    createdAt: new Date(task.created_at).getTime(),
+    order: task.order,
+    changelog: changelog.map(c => ({
+      id: c.id,
+      type: c.type as 'created' | 'status' | 'priority' | 'title' | 'moved' | 'description',
+      timestamp: new Date(c.created_at).getTime(),
+      from: c.from_value || undefined,
+      to: c.to_value || undefined,
+      projectName: c.project_name || undefined,
+    })),
+  };
+}
+
+// Transform Supabase project to legacy format
+function transformProject(project: Project, taskCount: number): LegacyProject {
+  return {
+    id: project.id,
+    name: project.name,
+    color: project.color,
+    tasks: [], // Tasks are loaded separately
+    createdAt: new Date(project.created_at).getTime(),
+  };
+}
 
 export function Dashboard() {
-  const [projects, setProjects, isHydrated] = useLocalStorage<Project[]>('pm-projects', [DEFAULT_PROJECT]);
+  const { user, signOut } = useAuth();
+  const { projects, loading: projectsLoading, createProject, updateProject, deleteProject } = useProjects();
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const { tasks, loading: tasksLoading, createTask, updateTask, deleteTask, moveTask, getTaskChangelog } = useTasks(activeProjectId);
+
   const [isEditingHeader, setIsEditingHeader] = useState(false);
   const [headerEditName, setHeaderEditName] = useState('');
   const headerInputRef = useRef<HTMLInputElement>(null);
-  const [taskToMove, setTaskToMove] = useState<Task | null>(null);
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [taskToMove, setTaskToMove] = useState<LegacyTask | null>(null);
+  const [selectedTask, setSelectedTask] = useState<LegacyTask | null>(null);
+  const [selectedTaskChangelog, setSelectedTaskChangelog] = useState<TaskChangelog[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Migrate old tasks to default project on first load
+  // Set active project when projects load
   useEffect(() => {
-    if (isHydrated && projects.length > 0 && !activeProjectId) {
-      // Check for old tasks in localStorage
-      const oldTasks = localStorage.getItem('pm-tasks');
-      if (oldTasks) {
-        try {
-          const tasks = JSON.parse(oldTasks) as Task[];
-          if (tasks.length > 0) {
-            // Add old tasks to first project
-            setProjects(prev => prev.map((p, i) =>
-              i === 0 ? { ...p, tasks: [...p.tasks, ...tasks] } : p
-            ));
-            // Remove old tasks key
-            localStorage.removeItem('pm-tasks');
-          }
-        } catch (e) {
-          console.error('Failed to migrate old tasks:', e);
-        }
-      }
+    if (!projectsLoading && projects.length > 0 && !activeProjectId) {
       setActiveProjectId(projects[0].id);
     }
-  }, [isHydrated, projects, activeProjectId, setProjects]);
+  }, [projectsLoading, projects, activeProjectId]);
 
   const activeProject = projects.find(p => p.id === activeProjectId);
 
-  const handleCreateProject = (project: Project) => {
-    setProjects(prev => [...prev, project]);
-    setActiveProjectId(project.id);
+  // Transform tasks for child components
+  const legacyTasks: LegacyTask[] = tasks.map(t => transformTask(t));
+
+  // Create legacy projects with task counts for sidebar
+  const legacyProjects: LegacyProject[] = projects.map(p => ({
+    ...transformProject(p, 0),
+    tasks: p.id === activeProjectId ? legacyTasks : [],
+  }));
+
+  const handleCreateProject = async (project: LegacyProject) => {
+    const newProject = await createProject(project.name, project.color);
+    if (!newProject) {
+      throw new Error('Failed to create project. Please try again.');
+    }
+    setActiveProjectId(newProject.id);
   };
 
-  const handleDeleteProject = (id: string) => {
-    setProjects(prev => prev.filter(p => p.id !== id));
-    if (activeProjectId === id) {
+  const handleDeleteProject = async (id: string) => {
+    const success = await deleteProject(id);
+    if (success && activeProjectId === id) {
       const remaining = projects.filter(p => p.id !== id);
       setActiveProjectId(remaining.length > 0 ? remaining[0].id : null);
     }
   };
 
-  const handleTasksChange = (tasks: Task[]) => {
-    setProjects(prev =>
-      prev.map(p => (p.id === activeProjectId ? { ...p, tasks } : p))
-    );
+  const handleRenameProject = async (id: string, name: string) => {
+    await updateProject(id, { name });
   };
 
-  const handleRenameProject = (id: string, name: string) => {
-    setProjects(prev =>
-      prev.map(p => (p.id === id ? { ...p, name } : p))
-    );
+  const handleTasksChange = async (updatedTasks: LegacyTask[]) => {
+    // Find what changed by comparing with current tasks
+    for (const updatedTask of updatedTasks) {
+      const currentTask = tasks.find(t => t.id === updatedTask.id);
+
+      if (!currentTask) {
+        // New task
+        await createTask(updatedTask.title, updatedTask.status, updatedTask.priority);
+      } else {
+        // Check for changes
+        const changes: Partial<Task> = {};
+        if (currentTask.status !== updatedTask.status) {
+          changes.status = updatedTask.status;
+        }
+        if (currentTask.priority !== updatedTask.priority) {
+          changes.priority = updatedTask.priority;
+        }
+        if (currentTask.title !== updatedTask.title) {
+          changes.title = updatedTask.title;
+        }
+        if (currentTask.description !== updatedTask.description) {
+          changes.description = updatedTask.description || null;
+        }
+
+        if (Object.keys(changes).length > 0) {
+          await updateTask(updatedTask.id, changes);
+        }
+      }
+    }
+
+    // Check for deleted tasks
+    for (const currentTask of tasks) {
+      if (!updatedTasks.find(t => t.id === currentTask.id)) {
+        await deleteTask(currentTask.id);
+      }
+    }
   };
 
   const startHeaderEdit = () => {
@@ -90,9 +144,9 @@ export function Dashboard() {
     }
   };
 
-  const submitHeaderEdit = () => {
+  const submitHeaderEdit = async () => {
     if (activeProject && headerEditName.trim()) {
-      handleRenameProject(activeProject.id, headerEditName.trim());
+      await handleRenameProject(activeProject.id, headerEditName.trim());
     }
     setIsEditingHeader(false);
     setHeaderEditName('');
@@ -108,171 +162,48 @@ export function Dashboard() {
     }
   };
 
-  const handleMoveTask = (taskId: string, targetProjectId: string, targetStatus: import('@/types').TaskStatus) => {
-    const sourceProject = projects.find(p => p.tasks.some(t => t.id === taskId));
-    if (!sourceProject) return;
-
-    const task = sourceProject.tasks.find(t => t.id === taskId);
-    if (!task) return;
-
+  const handleMoveTask = async (taskId: string, targetProjectId: string, targetStatus: TaskStatus) => {
     const targetProject = projects.find(p => p.id === targetProjectId);
+    await moveTask(taskId, targetProjectId, targetStatus, targetProject?.name);
+    setTaskToMove(null);
+  };
 
-    // If moving to same project, just update status
-    if (targetProjectId === sourceProject.id) {
-      const statusChanged = task.status !== targetStatus;
-      setProjects(prev =>
-        prev.map(p =>
-          p.id === sourceProject.id
-            ? {
-                ...p,
-                tasks: p.tasks.map(t =>
-                  t.id === taskId
-                    ? {
-                        ...t,
-                        status: targetStatus,
-                        changelog: statusChanged
-                          ? [
-                              ...(t.changelog || []),
-                              {
-                                id: generateId(),
-                                type: 'status' as const,
-                                timestamp: Date.now(),
-                                from: task.status,
-                                to: targetStatus,
-                              },
-                            ]
-                          : t.changelog,
-                      }
-                    : t
-                ),
-              }
-            : p
-        )
-      );
-    } else {
-      // Move to different project
-      const movedTask: Task = {
-        ...task,
-        status: targetStatus,
-        changelog: [
-          ...(task.changelog || []),
-          {
-            id: generateId(),
-            type: 'moved' as const,
-            timestamp: Date.now(),
-            projectName: targetProject?.name,
-          },
-          ...(task.status !== targetStatus
-            ? [
-                {
-                  id: generateId(),
-                  type: 'status' as const,
-                  timestamp: Date.now(),
-                  from: task.status,
-                  to: targetStatus,
-                },
-              ]
-            : []),
-        ],
-      };
-      setProjects(prev =>
-        prev.map(p => {
-          if (p.id === sourceProject.id) {
-            return { ...p, tasks: p.tasks.filter(t => t.id !== taskId) };
-          }
-          if (p.id === targetProjectId) {
-            return { ...p, tasks: [...p.tasks, movedTask] };
-          }
-          return p;
-        })
-      );
-    }
+  const handleTaskClick = useCallback(async (task: LegacyTask) => {
+    // Fetch changelog for the task
+    const changelog = await getTaskChangelog(task.id);
+    setSelectedTaskChangelog(changelog);
+    setSelectedTask(transformTask(tasks.find(t => t.id === task.id)!, changelog));
+  }, [tasks, getTaskChangelog]);
 
-    // Update selectedTask if it was the one being moved
+  const handleUpdateTaskTitle = async (taskId: string, title: string) => {
+    await updateTask(taskId, { title });
+    // Refresh selected task
     if (selectedTask?.id === taskId) {
-      setSelectedTask(null);
+      const changelog = await getTaskChangelog(taskId);
+      const updatedTask = tasks.find(t => t.id === taskId);
+      if (updatedTask) {
+        setSelectedTask(transformTask({ ...updatedTask, title }, changelog));
+        setSelectedTaskChangelog(changelog);
+      }
     }
   };
 
-  const handleUpdateTaskTitle = (taskId: string, title: string) => {
-    const newChangelogEntry = {
-      id: generateId(),
-      type: 'title' as const,
-      timestamp: Date.now(),
-      from: selectedTask?.title,
-      to: title,
-    };
-
-    setProjects(prev =>
-      prev.map(p => ({
-        ...p,
-        tasks: p.tasks.map(t => {
-          if (t.id === taskId) {
-            return {
-              ...t,
-              title,
-              changelog: [...(t.changelog || []), newChangelogEntry],
-            };
-          }
-          return t;
-        }),
-      }))
-    );
-
-    // Update selectedTask state to reflect the change including changelog
+  const handleUpdateTaskDescription = async (taskId: string, description: string) => {
+    await updateTask(taskId, { description: description || null });
+    // Refresh selected task
     if (selectedTask?.id === taskId) {
-      setSelectedTask(prev =>
-        prev
-          ? {
-              ...prev,
-              title,
-              changelog: [...(prev.changelog || []), newChangelogEntry],
-            }
-          : null
-      );
+      const changelog = await getTaskChangelog(taskId);
+      const updatedTask = tasks.find(t => t.id === taskId);
+      if (updatedTask) {
+        setSelectedTask(transformTask({ ...updatedTask, description }, changelog));
+        setSelectedTaskChangelog(changelog);
+      }
     }
   };
 
-  const handleUpdateTaskDescription = (taskId: string, description: string) => {
-    const newChangelogEntry = {
-      id: generateId(),
-      type: 'description' as const,
-      timestamp: Date.now(),
-    };
-
-    setProjects(prev =>
-      prev.map(p => ({
-        ...p,
-        tasks: p.tasks.map(t => {
-          if (t.id === taskId) {
-            return {
-              ...t,
-              description,
-              changelog: [...(t.changelog || []), newChangelogEntry],
-            };
-          }
-          return t;
-        }),
-      }))
-    );
-
-    // Update selectedTask state to reflect the change including changelog
-    if (selectedTask?.id === taskId) {
-      setSelectedTask(prev =>
-        prev
-          ? {
-              ...prev,
-              description,
-              changelog: [...(prev.changelog || []), newChangelogEntry],
-            }
-          : null
-      );
-    }
-  };
-
-  if (!isHydrated) {
+  if (projectsLoading) {
     return (
-      <div className="h-screen flex items-center justify-center">
+      <div className="h-screen flex items-center justify-center bg-gradient-to-br from-void via-midnight to-void">
         <div className="animate-pulse-soft text-text-muted">Loading...</div>
       </div>
     );
@@ -282,7 +213,7 @@ export function Dashboard() {
     <div className="h-screen flex">
       {/* Project Sidebar */}
       <ProjectSidebar
-        projects={projects}
+        projects={legacyProjects}
         activeProjectId={activeProjectId}
         onSelectProject={setActiveProjectId}
         onCreateProject={handleCreateProject}
@@ -347,14 +278,23 @@ export function Dashboard() {
               </div>
             )}
 
-            {/* Settings Button */}
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="p-2.5 rounded-xl text-text-muted hover:text-text hover:bg-elevated border border-transparent hover:border-line transition-all duration-150"
-              title="Settings"
-            >
-              <Settings size={20} />
-            </button>
+            {/* Header Actions */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsSettingsOpen(true)}
+                className="p-2.5 rounded-xl text-text-muted hover:text-text hover:bg-elevated border border-transparent hover:border-line transition-all duration-150"
+                title="Settings"
+              >
+                <Settings size={20} />
+              </button>
+              <button
+                onClick={signOut}
+                className="p-2.5 rounded-xl text-text-muted hover:text-coral hover:bg-coral/10 border border-transparent hover:border-coral/20 transition-all duration-150"
+                title="Sign out"
+              >
+                <LogOut size={20} />
+              </button>
+            </div>
           </header>
 
           {/* Main Content */}
@@ -362,12 +302,18 @@ export function Dashboard() {
             <div className="flex-1 flex gap-8 min-h-0">
               {/* Kanban Board */}
               <main className="flex-1 min-w-0 animate-in" style={{ animationDelay: '100ms' }}>
-                <KanbanBoard
-                  tasks={activeProject.tasks}
-                  onTasksChange={handleTasksChange}
-                  onMoveClick={setTaskToMove}
-                  onTaskClick={setSelectedTask}
-                />
+                {tasksLoading ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="animate-pulse-soft text-text-muted">Loading tasks...</div>
+                  </div>
+                ) : (
+                  <KanbanBoard
+                    tasks={legacyTasks}
+                    onTasksChange={handleTasksChange}
+                    onMoveClick={setTaskToMove}
+                    onTaskClick={handleTaskClick}
+                  />
+                )}
               </main>
 
               {/* Sidebar */}
@@ -403,7 +349,7 @@ export function Dashboard() {
         <MoveTaskModal
           task={taskToMove}
           currentProjectId={activeProjectId}
-          projects={projects}
+          projects={legacyProjects}
           onMove={handleMoveTask}
           onClose={() => setTaskToMove(null)}
         />
