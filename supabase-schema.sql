@@ -24,6 +24,7 @@ CREATE TABLE projects (
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   name TEXT NOT NULL,
   color TEXT NOT NULL,
+  stale_threshold_hours INT DEFAULT 48,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -37,6 +38,7 @@ CREATE TABLE tasks (
   status TEXT NOT NULL DEFAULT 'todo',
   priority TEXT NOT NULL DEFAULT 'medium',
   "order" INT DEFAULT 0,
+  archived_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -49,6 +51,19 @@ CREATE TABLE task_changelog (
   to_value TEXT,
   project_name TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Project columns (custom kanban columns per project)
+CREATE TABLE project_columns (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL,
+  color TEXT,
+  "order" INT NOT NULL DEFAULT 0,
+  is_done_column BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(project_id, slug)
 );
 
 -- Todos (separate from kanban)
@@ -77,6 +92,7 @@ ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE task_changelog ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_columns ENABLE ROW LEVEL SECURITY;
 ALTER TABLE todos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notes ENABLE ROW LEVEL SECURITY;
 
@@ -139,6 +155,31 @@ CREATE POLICY "Users can create task changelog"
     task_id IN (SELECT id FROM tasks WHERE user_id = auth.uid())
   );
 
+-- Project columns policies
+CREATE POLICY "Users can view own project columns"
+  ON project_columns FOR SELECT
+  USING (
+    project_id IN (SELECT id FROM projects WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Users can create project columns"
+  ON project_columns FOR INSERT
+  WITH CHECK (
+    project_id IN (SELECT id FROM projects WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Users can update own project columns"
+  ON project_columns FOR UPDATE
+  USING (
+    project_id IN (SELECT id FROM projects WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Users can delete own project columns"
+  ON project_columns FOR DELETE
+  USING (
+    project_id IN (SELECT id FROM projects WHERE user_id = auth.uid())
+  );
+
 -- Todos policies
 CREATE POLICY "Users can view own todos"
   ON todos FOR SELECT
@@ -191,6 +232,23 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
+-- Auto-create default columns when a new project is created
+CREATE OR REPLACE FUNCTION public.handle_new_project()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.project_columns (project_id, name, slug, color, "order", is_done_column)
+  VALUES
+    (NEW.id, 'To Do', 'todo', '#64748b', 0, FALSE),
+    (NEW.id, 'In Progress', 'in-progress', '#e9a23b', 1, FALSE),
+    (NEW.id, 'Done', 'done', '#7cb587', 2, TRUE);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_project_created
+  AFTER INSERT ON projects
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_project();
+
 -- ================================================
 -- INDEXES (for performance)
 -- ================================================
@@ -198,7 +256,9 @@ CREATE TRIGGER on_auth_user_created
 CREATE INDEX idx_projects_user_id ON projects(user_id);
 CREATE INDEX idx_tasks_project_id ON tasks(project_id);
 CREATE INDEX idx_tasks_user_id ON tasks(user_id);
+CREATE INDEX idx_tasks_archived_at ON tasks(archived_at) WHERE archived_at IS NOT NULL;
 CREATE INDEX idx_task_changelog_task_id ON task_changelog(task_id);
+CREATE INDEX idx_project_columns_project_id ON project_columns(project_id);
 CREATE INDEX idx_todos_user_id ON todos(user_id);
 CREATE INDEX idx_notes_user_id ON notes(user_id);
 
@@ -207,3 +267,93 @@ CREATE INDEX idx_notes_user_id ON notes(user_id);
 -- ================================================
 -- After you sign up, run this to make yourself admin:
 -- UPDATE profiles SET is_admin = true WHERE email = 'your-email@example.com';
+
+-- ================================================
+-- MIGRATION: For existing databases (v2.0)
+-- ================================================
+-- Run this section if you already have data and want to add the new features.
+-- Skip if running the full schema above for a new installation.
+
+/*
+-- 1. Add stale_threshold_hours to projects
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS stale_threshold_hours INT DEFAULT 48;
+
+-- 2. Add archived_at to tasks
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_tasks_archived_at ON tasks(archived_at) WHERE archived_at IS NOT NULL;
+
+-- 3. Create project_columns table
+CREATE TABLE IF NOT EXISTS project_columns (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL,
+  color TEXT,
+  "order" INT NOT NULL DEFAULT 0,
+  is_done_column BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(project_id, slug)
+);
+
+-- 4. Enable RLS on project_columns
+ALTER TABLE project_columns ENABLE ROW LEVEL SECURITY;
+
+-- 5. Create policies for project_columns
+CREATE POLICY "Users can view own project columns"
+  ON project_columns FOR SELECT
+  USING (project_id IN (SELECT id FROM projects WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can create project columns"
+  ON project_columns FOR INSERT
+  WITH CHECK (project_id IN (SELECT id FROM projects WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can update own project columns"
+  ON project_columns FOR UPDATE
+  USING (project_id IN (SELECT id FROM projects WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can delete own project columns"
+  ON project_columns FOR DELETE
+  USING (project_id IN (SELECT id FROM projects WHERE user_id = auth.uid()));
+
+-- 6. Create index
+CREATE INDEX IF NOT EXISTS idx_project_columns_project_id ON project_columns(project_id);
+
+-- 7. Create trigger for new projects
+CREATE OR REPLACE FUNCTION public.handle_new_project()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.project_columns (project_id, name, slug, color, "order", is_done_column)
+  VALUES
+    (NEW.id, 'To Do', 'todo', '#64748b', 0, FALSE),
+    (NEW.id, 'In Progress', 'in-progress', '#e9a23b', 1, FALSE),
+    (NEW.id, 'Done', 'done', '#7cb587', 2, TRUE);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_project_created ON projects;
+CREATE TRIGGER on_project_created
+  AFTER INSERT ON projects
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_project();
+
+-- 8. Create default columns for existing projects
+INSERT INTO project_columns (project_id, name, slug, color, "order", is_done_column)
+SELECT p.id, 'To Do', 'todo', '#64748b', 0, FALSE
+FROM projects p
+WHERE NOT EXISTS (SELECT 1 FROM project_columns pc WHERE pc.project_id = p.id);
+
+INSERT INTO project_columns (project_id, name, slug, color, "order", is_done_column)
+SELECT p.id, 'In Progress', 'in-progress', '#e9a23b', 1, FALSE
+FROM projects p
+WHERE NOT EXISTS (SELECT 1 FROM project_columns pc WHERE pc.project_id = p.id AND pc.slug = 'in-progress');
+
+INSERT INTO project_columns (project_id, name, slug, color, "order", is_done_column)
+SELECT p.id, 'Done', 'done', '#7cb587', 2, TRUE
+FROM projects p
+WHERE NOT EXISTS (SELECT 1 FROM project_columns pc WHERE pc.project_id = p.id AND pc.slug = 'done');
+
+-- 9. Update existing tasks to use new column slugs (if status values differ)
+UPDATE tasks SET status = 'todo' WHERE status = 'todo';
+UPDATE tasks SET status = 'in-progress' WHERE status = 'in-progress';
+UPDATE tasks SET status = 'done' WHERE status = 'complete';
+*/

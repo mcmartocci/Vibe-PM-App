@@ -2,9 +2,20 @@
 
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { X, GripVertical, Flag, FolderInput, Check } from 'lucide-react';
+import { X, GripVertical, Flag, FolderInput, Check, Clock } from 'lucide-react';
 import { Task, TaskPriority } from '@/types';
 import { cn } from '@/lib/utils';
+
+function formatTimeInStage(ms: number): string {
+  const hours = Math.floor(ms / (1000 * 60 * 60));
+  const days = Math.floor(hours / 24);
+  const weeks = Math.floor(days / 7);
+
+  if (hours < 1) return '< 1h';
+  if (hours < 24) return `${hours}h`;
+  if (days < 7) return `${days}d`;
+  return `${weeks}w`;
+}
 
 interface TaskCardProps {
   task: Task;
@@ -13,6 +24,8 @@ interface TaskCardProps {
   onMoveClick?: (task: Task) => void;
   onTaskClick?: (task: Task) => void;
   isDragOverlay?: boolean;
+  timeInStage?: number;
+  isStale?: boolean;
 }
 
 const priorityConfig: Record<TaskPriority, { color: string; bg: string; label: string }> = {
@@ -23,7 +36,7 @@ const priorityConfig: Record<TaskPriority, { color: string; bg: string; label: s
 
 const priorityOrder: TaskPriority[] = ['low', 'medium', 'high'];
 
-export function TaskCard({ task, onDelete, onUpdatePriority, onMoveClick, onTaskClick, isDragOverlay }: TaskCardProps) {
+export function TaskCard({ task, onDelete, onUpdatePriority, onMoveClick, onTaskClick, isDragOverlay, timeInStage, isStale }: TaskCardProps) {
   const {
     attributes,
     listeners,
@@ -78,6 +91,16 @@ export function TaskCard({ task, onDelete, onUpdatePriority, onMoveClick, onTask
       {...attributes}
       {...listeners}
     >
+      {/* Stale warning badge - top right */}
+      {isStale && (
+        <div
+          className="absolute -top-1.5 -right-1.5 p-1.5 rounded-full bg-amber/20 border border-amber/30 z-10"
+          title="Task has been in this column for a while"
+        >
+          <Clock size={12} className="text-amber" />
+        </div>
+      )}
+
       {/* Completion shine overlay */}
       {isComplete && (
         <div className="absolute inset-0 rounded-xl overflow-hidden pointer-events-none">
@@ -136,7 +159,7 @@ export function TaskCard({ task, onDelete, onUpdatePriority, onMoveClick, onTask
         </div>
       </div>
 
-      {/* Priority Badge & Completion Badge */}
+      {/* Priority Badge, Time Indicator & Completion Badge */}
       <div className="mt-3 pl-3 flex items-center gap-2">
         <button
           onClick={cyclePriority}
@@ -152,6 +175,23 @@ export function TaskCard({ task, onDelete, onUpdatePriority, onMoveClick, onTask
           <Flag size={10} />
           {config.label}
         </button>
+
+        {/* Time in Stage Indicator */}
+        {timeInStage !== undefined && timeInStage > 0 && (
+          <div
+            className={cn(
+              'inline-flex items-center gap-1 px-2 py-1 rounded-md',
+              'text-xs font-medium',
+              isStale
+                ? 'bg-amber/15 text-amber'
+                : 'bg-text-muted/10 text-text-muted'
+            )}
+            title={`Time in this column: ${formatTimeInStage(timeInStage)}`}
+          >
+            <Clock size={10} />
+            {formatTimeInStage(timeInStage)}
+          </div>
+        )}
 
         {/* Completion Badge */}
         {isComplete && (

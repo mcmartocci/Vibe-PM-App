@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { Folder, Pencil, Settings, LogOut } from 'lucide-react';
-import { Task as LegacyTask, TaskStatus, TaskPriority, Project as LegacyProject } from '@/types';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { Folder, Pencil, Settings, LogOut, Archive, Columns3, Sliders } from 'lucide-react';
+import { Task as LegacyTask, TaskStatus, TaskPriority, Project as LegacyProject, ColumnConfig } from '@/types';
 import { useAuth } from '@/hooks/useAuth';
 import { useProjects, Project } from '@/hooks/useProjects';
 import { useTasks, Task, TaskChangelog } from '@/hooks/useTasks';
+import { useColumns, ProjectColumn } from '@/hooks/useColumns';
 import { ProjectSidebar } from './projects/ProjectSidebar';
 import { KanbanBoard } from './kanban/KanbanBoard';
 import { MoveTaskModal } from './kanban/MoveTaskModal';
@@ -13,6 +14,9 @@ import { TaskDetailModal } from './kanban/TaskDetailModal';
 import { TodoList } from './todo/TodoList';
 import { NotesPanel } from './notes/NotesPanel';
 import { SettingsPanel } from './settings/SettingsPanel';
+import { ArchivePanel } from './archive/ArchivePanel';
+import { ColumnManager } from './settings/ColumnManager';
+import { ProjectSettingsPanel } from './settings/ProjectSettingsPanel';
 
 // Transform Supabase task to legacy format for child components
 function transformTask(task: Task, changelog: TaskChangelog[] = []): LegacyTask {
@@ -24,6 +28,8 @@ function transformTask(task: Task, changelog: TaskChangelog[] = []): LegacyTask 
     priority: (task.priority || 'medium') as TaskPriority,
     createdAt: new Date(task.created_at).getTime(),
     order: task.order,
+    archivedAt: task.archived_at ? new Date(task.archived_at).getTime() : undefined,
+    timeInStage: task.time_in_stage,
     changelog: changelog.map(c => ({
       id: c.id,
       type: c.type as 'created' | 'status' | 'priority' | 'title' | 'moved' | 'description',
@@ -33,6 +39,16 @@ function transformTask(task: Task, changelog: TaskChangelog[] = []): LegacyTask 
       projectName: c.project_name || undefined,
     })),
   };
+}
+
+// Transform project columns to ColumnConfig for KanbanBoard
+function transformColumns(columns: ProjectColumn[]): ColumnConfig[] {
+  return columns.map(col => ({
+    id: col.slug,
+    title: col.name,
+    color: col.color || undefined,
+    isDoneColumn: col.is_done_column,
+  }));
 }
 
 // Transform Supabase project to legacy format
@@ -48,9 +64,38 @@ function transformProject(project: Project, taskCount: number): LegacyProject {
 
 export function Dashboard() {
   const { user, signOut } = useAuth();
-  const { projects, loading: projectsLoading, createProject, updateProject, deleteProject } = useProjects();
+  const { projects, loading: projectsLoading, createProject, updateProject, deleteProject, refetch: refetchProjects } = useProjects();
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const { tasks, loading: tasksLoading, createTask, updateTask, deleteTask, moveTask, getTaskChangelog } = useTasks(activeProjectId);
+
+  // Get stale threshold from active project
+  const activeProject = projects.find(p => p.id === activeProjectId);
+  const staleThresholdHours = activeProject?.stale_threshold_hours ?? 48;
+
+  const {
+    tasks,
+    archivedTasks,
+    loading: tasksLoading,
+    createTask,
+    updateTask,
+    deleteTask,
+    moveTask,
+    getTaskChangelog,
+    archiveTask,
+    unarchiveTask,
+    fetchArchivedTasks,
+    isTaskStale,
+  } = useTasks(activeProjectId, staleThresholdHours);
+
+  const {
+    columns,
+    fetchColumns,
+    setColumns,
+    createColumn,
+    updateColumn,
+    deleteColumn,
+    reorderColumns,
+    generateSlug,
+  } = useColumns(activeProjectId);
 
   const [isEditingHeader, setIsEditingHeader] = useState(false);
   const [headerEditName, setHeaderEditName] = useState('');
@@ -59,6 +104,9 @@ export function Dashboard() {
   const [selectedTask, setSelectedTask] = useState<LegacyTask | null>(null);
   const [selectedTaskChangelog, setSelectedTaskChangelog] = useState<TaskChangelog[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isArchiveOpen, setIsArchiveOpen] = useState(false);
+  const [isColumnManagerOpen, setIsColumnManagerOpen] = useState(false);
+  const [isProjectSettingsOpen, setIsProjectSettingsOpen] = useState(false);
 
   // Set active project when projects load
   useEffect(() => {
@@ -67,16 +115,44 @@ export function Dashboard() {
     }
   }, [projectsLoading, projects, activeProjectId]);
 
-  const activeProject = projects.find(p => p.id === activeProjectId);
+  // Fetch columns when active project changes
+  useEffect(() => {
+    if (activeProjectId) {
+      fetchColumns();
+    }
+  }, [activeProjectId, fetchColumns]);
 
-  // Transform tasks for child components
-  const legacyTasks: LegacyTask[] = tasks.map(t => transformTask(t));
+  // Transform columns for KanbanBoard
+  const kanbanColumns = useMemo(() => transformColumns(columns), [columns]);
+
+  // Transform tasks for child components with stale info
+  const legacyTasks: LegacyTask[] = tasks.map(t => ({
+    ...transformTask(t),
+    isStale: isTaskStale(t),
+  }));
+
+  // Transform archived tasks for ArchivePanel
+  const legacyArchivedTasks: LegacyTask[] = archivedTasks.map(t => transformTask(t));
 
   // Create legacy projects with task counts for sidebar
-  const legacyProjects: LegacyProject[] = projects.map(p => ({
-    ...transformProject(p, 0),
-    tasks: p.id === activeProjectId ? legacyTasks : [],
-  }));
+  // Use task_count from the hook for non-active projects, and actual tasks for the active one
+  const legacyProjects: LegacyProject[] = projects.map(p => {
+    const isActive = p.id === activeProjectId;
+    const taskCount = isActive ? legacyTasks.length : (p.task_count || 0);
+    // Create a dummy tasks array with the correct length for the sidebar count display
+    const dummyTasks = Array(taskCount).fill(null).map((_, i) => ({
+      id: `dummy-${i}`,
+      title: '',
+      status: 'todo' as TaskStatus,
+      priority: 'medium' as TaskPriority,
+      createdAt: 0,
+      order: i,
+    }));
+    return {
+      ...transformProject(p, taskCount),
+      tasks: isActive ? legacyTasks : dummyTasks,
+    };
+  });
 
   const handleCreateProject = async (project: LegacyProject) => {
     const newProject = await createProject(project.name, project.color);
@@ -99,6 +175,8 @@ export function Dashboard() {
   };
 
   const handleTasksChange = async (updatedTasks: LegacyTask[]) => {
+    let taskCountChanged = false;
+
     // Find what changed by comparing with current tasks
     for (const updatedTask of updatedTasks) {
       const currentTask = tasks.find(t => t.id === updatedTask.id);
@@ -106,6 +184,7 @@ export function Dashboard() {
       if (!currentTask) {
         // New task
         await createTask(updatedTask.title, updatedTask.status, updatedTask.priority);
+        taskCountChanged = true;
       } else {
         // Check for changes
         const changes: Partial<Task> = {};
@@ -132,7 +211,13 @@ export function Dashboard() {
     for (const currentTask of tasks) {
       if (!updatedTasks.find(t => t.id === currentTask.id)) {
         await deleteTask(currentTask.id);
+        taskCountChanged = true;
       }
+    }
+
+    // Refresh project task counts if tasks were added or removed
+    if (taskCountChanged) {
+      refetchProjects();
     }
   };
 
@@ -164,9 +249,72 @@ export function Dashboard() {
 
   const handleMoveTask = async (taskId: string, targetProjectId: string, targetStatus: TaskStatus) => {
     const targetProject = projects.find(p => p.id === targetProjectId);
-    await moveTask(taskId, targetProjectId, targetStatus, targetProject?.name);
+    // Check if target column is the done column
+    const targetColumn = columns.find(c => c.slug === targetStatus);
+    const isDoneColumn = targetColumn?.is_done_column || false;
+    await moveTask(taskId, targetProjectId, targetStatus, targetProject?.name, isDoneColumn);
     setTaskToMove(null);
+    // Refresh project task counts since moving affects both source and target projects
+    refetchProjects();
   };
+
+  const handleArchiveTask = async (taskId: string) => {
+    await archiveTask(taskId);
+    refetchProjects();
+  };
+
+  const handleUnarchiveTask = async (taskId: string, projectId: string) => {
+    // Get the first column for the project (default status)
+    const firstColumn = columns[0]?.slug || 'todo';
+    await unarchiveTask(taskId, firstColumn);
+    refetchProjects();
+  };
+
+  const handleDeleteArchivedTask = async (taskId: string) => {
+    await deleteTask(taskId);
+    refetchProjects();
+  };
+
+  const handleUpdateProjectSettings = async (id: string, updates: { stale_threshold_hours?: number }) => {
+    await updateProject(id, updates);
+    await refetchProjects();
+  };
+
+  const handleColumnsChange = useCallback((newColumns: ProjectColumn[]) => {
+    setColumns(newColumns);
+  }, [setColumns]);
+
+  // Column operations for inline editing
+  const handleColumnRename = useCallback(async (columnSlug: string, newTitle: string) => {
+    const column = columns.find(c => c.slug === columnSlug);
+    if (column) {
+      await updateColumn(column.id, { name: newTitle });
+    }
+  }, [columns, updateColumn]);
+
+  const handleColumnReorder = useCallback(async (columnSlugs: string[]) => {
+    // Map slugs to column IDs
+    const columnIds = columnSlugs.map(slug => {
+      const col = columns.find(c => c.slug === slug);
+      return col?.id;
+    }).filter(Boolean) as string[];
+
+    if (columnIds.length === columnSlugs.length) {
+      await reorderColumns(columnIds);
+    }
+  }, [columns, reorderColumns]);
+
+  const handleColumnAdd = useCallback(async (title: string) => {
+    const slug = generateSlug(title);
+    await createColumn(title, slug);
+  }, [createColumn, generateSlug]);
+
+  const handleColumnDelete = useCallback(async (columnSlug: string) => {
+    const column = columns.find(c => c.slug === columnSlug);
+    if (column && columns.length > 1) {
+      await deleteColumn(column.id);
+    }
+  }, [columns, deleteColumn]);
 
   const handleTaskClick = useCallback(async (task: LegacyTask) => {
     // Fetch changelog for the task
@@ -266,6 +414,22 @@ export function Dashboard() {
                       >
                         <Pencil size={16} />
                       </button>
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center gap-1 ml-2">
+                        <button
+                          onClick={() => setIsColumnManagerOpen(true)}
+                          className="p-1.5 rounded-lg text-text-muted hover:text-amber hover:bg-elevated transition-all duration-150"
+                          title="Manage columns"
+                        >
+                          <Columns3 size={16} />
+                        </button>
+                        <button
+                          onClick={() => setIsProjectSettingsOpen(true)}
+                          className="p-1.5 rounded-lg text-text-muted hover:text-amber hover:bg-elevated transition-all duration-150"
+                          title="Project settings"
+                        >
+                          <Sliders size={16} />
+                        </button>
+                      </div>
                     </>
                   )}
                 </div>
@@ -278,12 +442,19 @@ export function Dashboard() {
               </div>
             )}
 
-            {/* Header Actions */}
+            {/* Header Actions - Global only */}
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsArchiveOpen(true)}
+                className="p-2.5 rounded-xl text-text-muted hover:text-text hover:bg-elevated border border-transparent hover:border-line transition-all duration-150"
+                title="View archived tasks"
+              >
+                <Archive size={20} />
+              </button>
               <button
                 onClick={() => setIsSettingsOpen(true)}
                 className="p-2.5 rounded-xl text-text-muted hover:text-text hover:bg-elevated border border-transparent hover:border-line transition-all duration-150"
-                title="Settings"
+                title="App Settings"
               >
                 <Settings size={20} />
               </button>
@@ -312,6 +483,12 @@ export function Dashboard() {
                     onTasksChange={handleTasksChange}
                     onMoveClick={setTaskToMove}
                     onTaskClick={handleTaskClick}
+                    columns={kanbanColumns}
+                    onTaskArchive={handleArchiveTask}
+                    onColumnRename={handleColumnRename}
+                    onColumnReorder={handleColumnReorder}
+                    onColumnAdd={handleColumnAdd}
+                    onColumnDelete={handleColumnDelete}
                   />
                 )}
               </main>
@@ -370,6 +547,42 @@ export function Dashboard() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
       />
+
+      {/* Archive Panel */}
+      <ArchivePanel
+        isOpen={isArchiveOpen}
+        onClose={() => setIsArchiveOpen(false)}
+        archivedTasks={legacyArchivedTasks}
+        projects={legacyProjects}
+        onUnarchive={handleUnarchiveTask}
+        onDelete={handleDeleteArchivedTask}
+        onFetchArchived={async (projectId?: string) => { await fetchArchivedTasks(projectId); }}
+      />
+
+      {/* Column Manager */}
+      {activeProjectId && (
+        <ColumnManager
+          projectId={activeProjectId}
+          isOpen={isColumnManagerOpen}
+          onClose={() => setIsColumnManagerOpen(false)}
+          onColumnsChange={handleColumnsChange}
+        />
+      )}
+
+      {/* Project Settings Panel */}
+      {activeProject && (
+        <ProjectSettingsPanel
+          isOpen={isProjectSettingsOpen}
+          onClose={() => setIsProjectSettingsOpen(false)}
+          project={{
+            id: activeProject.id,
+            name: activeProject.name,
+            color: activeProject.color,
+            staleThresholdHours: activeProject.stale_threshold_hours ?? 48,
+          }}
+          onUpdateProject={handleUpdateProjectSettings}
+        />
+      )}
     </div>
   );
 }

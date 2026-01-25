@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
-export type TaskStatus = 'todo' | 'in-progress' | 'complete';
+export type TaskStatus = string; // Dynamic based on project columns
 export type TaskPriority = 'low' | 'medium' | 'high';
 
 export interface Task {
@@ -15,7 +15,11 @@ export interface Task {
   status: TaskStatus;
   priority: TaskPriority;
   order: number;
+  archived_at: string | null;
   created_at: string;
+  // Computed fields
+  time_in_stage?: number; // Milliseconds in current stage
+  last_status_change?: string; // Timestamp of last status change
 }
 
 export interface TaskChangelog {
@@ -28,10 +32,30 @@ export interface TaskChangelog {
   created_at: string;
 }
 
-export function useTasks(projectId: string | null) {
+export function useTasks(projectId: string | null, staleThresholdHours: number = 48) {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [archivedTasks, setArchivedTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Calculate time in stage for a task based on its changelog
+  const calculateTimeInStage = useCallback(async (task: Task): Promise<{ timeInStage: number; lastStatusChange: string }> => {
+    const supabase = createClient();
+
+    // Get the most recent status change
+    const { data: changelog } = await supabase
+      .from('task_changelog')
+      .select('created_at')
+      .eq('task_id', task.id)
+      .eq('type', 'status')
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    const lastStatusChange = changelog?.[0]?.created_at || task.created_at;
+    const timeInStage = Date.now() - new Date(lastStatusChange).getTime();
+
+    return { timeInStage, lastStatusChange };
+  }, []);
 
   const fetchTasks = useCallback(async () => {
     if (!projectId) {
@@ -42,19 +66,60 @@ export function useTasks(projectId: string | null) {
 
     const supabase = createClient();
 
+    // Fetch active (non-archived) tasks
     const { data, error } = await supabase
       .from('tasks')
       .select('*')
       .eq('project_id', projectId)
+      .is('archived_at', null)
       .order('order', { ascending: true });
 
     if (error) {
       setError(error.message);
     } else {
-      setTasks(data || []);
+      // Calculate time in stage for each task
+      const tasksWithTime = await Promise.all(
+        (data || []).map(async (task) => {
+          const { timeInStage, lastStatusChange } = await calculateTimeInStage(task);
+          return {
+            ...task,
+            time_in_stage: timeInStage,
+            last_status_change: lastStatusChange,
+          };
+        })
+      );
+      setTasks(tasksWithTime);
     }
     setLoading(false);
-  }, [projectId]);
+  }, [projectId, calculateTimeInStage]);
+
+  const fetchArchivedTasks = useCallback(async (forProjectId?: string) => {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) return [];
+
+    let query = supabase
+      .from('tasks')
+      .select('*')
+      .eq('user_id', user.id)
+      .not('archived_at', 'is', null)
+      .order('archived_at', { ascending: false });
+
+    if (forProjectId) {
+      query = query.eq('project_id', forProjectId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error fetching archived tasks:', error);
+      return [];
+    }
+
+    setArchivedTasks(data || []);
+    return data || [];
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -99,13 +164,18 @@ export function useTasks(projectId: string | null) {
       type: 'created',
     });
 
-    setTasks(prev => [...prev, data]);
-    return data;
+    const newTask = {
+      ...data,
+      time_in_stage: 0,
+      last_status_change: data.created_at,
+    };
+    setTasks(prev => [...prev, newTask]);
+    return newTask;
   };
 
   const updateTask = async (
     id: string,
-    updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'order'>>
+    updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'order' | 'archived_at'>>
   ) => {
     const supabase = createClient();
     const currentTask = tasks.find(t => t.id === id);
@@ -156,7 +226,73 @@ export function useTasks(projectId: string | null) {
       }
     }
 
-    setTasks(prev => prev.map(t => t.id === id ? data : t));
+    // Calculate new time in stage if status changed
+    let timeInStage = currentTask?.time_in_stage || 0;
+    let lastStatusChange = currentTask?.last_status_change || data.created_at;
+
+    if (updates.status && updates.status !== currentTask?.status) {
+      timeInStage = 0;
+      lastStatusChange = new Date().toISOString();
+    }
+
+    const updatedTask = {
+      ...data,
+      time_in_stage: timeInStage,
+      last_status_change: lastStatusChange,
+    };
+
+    setTasks(prev => prev.map(t => t.id === id ? updatedTask : t));
+    return updatedTask;
+  };
+
+  const archiveTask = async (id: string) => {
+    const supabase = createClient();
+
+    const { data, error } = await supabase
+      .from('tasks')
+      .update({ archived_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      setError(error.message);
+      return null;
+    }
+
+    // Remove from active tasks, add to archived
+    setTasks(prev => prev.filter(t => t.id !== id));
+    setArchivedTasks(prev => [data, ...prev]);
+
+    return data;
+  };
+
+  const unarchiveTask = async (id: string, targetStatus?: TaskStatus) => {
+    const supabase = createClient();
+
+    const updates: { archived_at: null; status?: string } = { archived_at: null };
+    if (targetStatus) {
+      updates.status = targetStatus;
+    }
+
+    const { data, error } = await supabase
+      .from('tasks')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      setError(error.message);
+      return null;
+    }
+
+    // Remove from archived, will be added to active on next fetch
+    setArchivedTasks(prev => prev.filter(t => t.id !== id));
+
+    // Refetch to get the task in the active list with proper time calculations
+    await fetchTasks();
+
     return data;
   };
 
@@ -174,6 +310,7 @@ export function useTasks(projectId: string | null) {
     }
 
     setTasks(prev => prev.filter(t => t.id !== id));
+    setArchivedTasks(prev => prev.filter(t => t.id !== id));
     return true;
   };
 
@@ -181,19 +318,27 @@ export function useTasks(projectId: string | null) {
     taskId: string,
     targetProjectId: string,
     targetStatus: TaskStatus,
-    targetProjectName?: string
+    targetProjectName?: string,
+    isDoneColumn?: boolean
   ) => {
     const supabase = createClient();
     const currentTask = tasks.find(t => t.id === taskId);
 
     if (!currentTask) return null;
 
+    const updates: { project_id: string; status: string; archived_at?: string } = {
+      project_id: targetProjectId,
+      status: targetStatus,
+    };
+
+    // Auto-archive if moving to done column
+    if (isDoneColumn) {
+      updates.archived_at = new Date().toISOString();
+    }
+
     const { data, error } = await supabase
       .from('tasks')
-      .update({
-        project_id: targetProjectId,
-        status: targetStatus,
-      })
+      .update(updates)
       .eq('id', taskId)
       .select()
       .single();
@@ -221,11 +366,19 @@ export function useTasks(projectId: string | null) {
       });
     }
 
-    // If moved to different project, remove from current list
-    if (targetProjectId !== projectId) {
+    // If archived or moved to different project, remove from current list
+    if (isDoneColumn || targetProjectId !== projectId) {
       setTasks(prev => prev.filter(t => t.id !== taskId));
+      if (isDoneColumn) {
+        setArchivedTasks(prev => [data, ...prev]);
+      }
     } else {
-      setTasks(prev => prev.map(t => t.id === taskId ? data : t));
+      const updatedTask = {
+        ...data,
+        time_in_stage: 0,
+        last_status_change: new Date().toISOString(),
+      };
+      setTasks(prev => prev.map(t => t.id === taskId ? updatedTask : t));
     }
 
     return data;
@@ -248,15 +401,27 @@ export function useTasks(projectId: string | null) {
     return data || [];
   };
 
+  // Check if a task is stale based on threshold
+  const isTaskStale = useCallback((task: Task): boolean => {
+    if (!task.time_in_stage) return false;
+    const thresholdMs = staleThresholdHours * 60 * 60 * 1000;
+    return task.time_in_stage > thresholdMs;
+  }, [staleThresholdHours]);
+
   return {
     tasks,
+    archivedTasks,
     loading,
     error,
     createTask,
     updateTask,
     deleteTask,
     moveTask,
+    archiveTask,
+    unarchiveTask,
     getTaskChangelog,
+    fetchArchivedTasks,
+    isTaskStale,
     refetch: fetchTasks,
   };
 }

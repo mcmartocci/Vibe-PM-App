@@ -15,9 +15,11 @@ interface KanbanColumnProps {
   onUpdatePriority: (id: string, priority: TaskPriority) => void;
   onMoveClick?: (task: Task) => void;
   onTaskClick?: (task: Task) => void;
+  hideHeader?: boolean;
 }
 
-const statusConfig: Record<TaskStatus, { color: string; glow: string }> = {
+// Default color configurations for legacy column IDs
+const defaultStatusConfig: Record<string, { color: string; glow: string }> = {
   'todo': {
     color: 'bg-mist',
     glow: 'group-hover:shadow-[0_0_20px_rgba(100,116,139,0.15)]',
@@ -32,26 +34,39 @@ const statusConfig: Record<TaskStatus, { color: string; glow: string }> = {
   },
 };
 
-export function KanbanColumn({ column, tasks, onAddTask, onDeleteTask, onUpdatePriority, onMoveClick, onTaskClick }: KanbanColumnProps) {
+// Fallback config for custom columns
+const fallbackConfig = {
+  color: 'bg-mist',
+  glow: 'group-hover:shadow-[0_0_20px_rgba(100,116,139,0.15)]',
+};
+
+export function KanbanColumn({ column, tasks, onAddTask, onDeleteTask, onUpdatePriority, onMoveClick, onTaskClick, hideHeader }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
   });
 
-  const config = statusConfig[column.id];
+  // Use column's custom color if available, otherwise fall back to default config
+  const config = defaultStatusConfig[column.id] || fallbackConfig;
+  const customColor = column.color;
 
   return (
-    <div className="flex flex-col h-full min-w-0 group">
-      {/* Column Header */}
-      <div className="flex items-center gap-3 mb-4 px-1">
-        <div className={cn('w-2.5 h-2.5 rounded-full', config.color)} />
-        <h2 className="font-[family-name:var(--font-display)] text-text text-lg font-medium tracking-tight">
-          {column.title}
-        </h2>
-        <div className="flex-1 h-px bg-gradient-to-r from-line to-transparent" />
-        <span className="text-text-muted text-xs font-medium tabular-nums">
-          {tasks.length}
-        </span>
-      </div>
+    <div className={cn("flex flex-col h-full min-w-0 group", hideHeader ? "" : "")}>
+      {/* Column Header - only show if not hidden */}
+      {!hideHeader && (
+        <div className="flex items-center gap-3 mb-4 px-1">
+          <div
+            className={cn('w-2.5 h-2.5 rounded-full', !customColor && config.color)}
+            style={customColor ? { backgroundColor: customColor } : undefined}
+          />
+          <h2 className="font-[family-name:var(--font-display)] text-text text-lg font-medium tracking-tight">
+            {column.title}
+          </h2>
+          <div className="flex-1 h-px bg-gradient-to-r from-line to-transparent" />
+          <span className="text-text-muted text-xs font-medium tabular-nums">
+            {tasks.length}
+          </span>
+        </div>
+      )}
 
       {/* Drop Zone */}
       <div
@@ -74,6 +89,8 @@ export function KanbanColumn({ column, tasks, onAddTask, onDeleteTask, onUpdateP
               onUpdatePriority={onUpdatePriority}
               onMoveClick={onMoveClick}
               onTaskClick={onTaskClick}
+              timeInStage={task.timeInStage}
+              isStale={task.isStale}
             />
           ))}
         </SortableContext>
