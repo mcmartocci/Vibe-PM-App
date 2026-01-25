@@ -1,9 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { X, Clock, Flag, ArrowRight, Pencil, Check, History } from 'lucide-react';
-import { Task, TaskPriority, ChangelogEntry, ChangeType } from '@/types';
+import { X, Clock, Flag, ArrowRight, Pencil, Check, History, Paperclip } from 'lucide-react';
+import { Task, TaskPriority, ChangeType } from '@/types';
 import { cn } from '@/lib/utils';
+import { useAttachments } from '@/hooks/useAttachments';
+import { AttachmentList, AttachmentUploader } from '@/components/attachments';
 
 interface TaskDetailModalProps {
   task: Task;
@@ -31,6 +33,8 @@ const changeTypeConfig: Record<ChangeType, { icon: typeof Clock; label: string; 
   title: { icon: Pencil, label: 'Title updated', color: 'text-mist' },
   moved: { icon: ArrowRight, label: 'Moved to project', color: 'text-purple-400' },
   description: { icon: Pencil, label: 'Description updated', color: 'text-mist' },
+  attachment_added: { icon: Paperclip, label: 'Attachment added', color: 'text-sage' },
+  attachment_removed: { icon: Paperclip, label: 'Attachment removed', color: 'text-coral' },
 };
 
 function formatDate(timestamp: number): string {
@@ -76,8 +80,29 @@ export function TaskDetailModal({
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const [editDescription, setEditDescription] = useState(task.description || '');
 
+  const {
+    attachments,
+    loading: attachmentsLoading,
+    uploading,
+    error: attachmentError,
+    uploadFile,
+    deleteFile,
+    canUpload,
+    remainingSlots,
+    formatFileSize,
+    isImage,
+  } = useAttachments(task.id);
+
   const config = priorityConfig[task.priority] || priorityConfig.medium;
   const changelog = task.changelog || [];
+
+  const handleUpload = async (file: File) => {
+    await uploadFile(file);
+  };
+
+  const handleDeleteAttachment = async (id: string, storagePath: string): Promise<boolean> => {
+    return await deleteFile(id, storagePath);
+  };
 
   const handleTitleSubmit = () => {
     if (editTitle.trim() && editTitle.trim() !== task.title) {
@@ -236,6 +261,35 @@ export function TaskDetailModal({
             </div>
           </div>
 
+          {/* Attachments */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Paperclip size={16} className="text-text-muted" />
+                <h3 className="text-sm font-medium text-text-secondary">Attachments</h3>
+                <span className="text-xs text-text-muted">({attachments.length}/5)</span>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <AttachmentList
+                attachments={attachments}
+                onDelete={handleDeleteAttachment}
+                loading={attachmentsLoading}
+                formatFileSize={formatFileSize}
+                isImage={isImage}
+              />
+
+              <AttachmentUploader
+                onUpload={handleUpload}
+                uploading={uploading}
+                disabled={!canUpload}
+                remainingSlots={remainingSlots}
+                error={attachmentError}
+              />
+            </div>
+          </div>
+
           {/* Changelog */}
           <div>
             <div className="flex items-center gap-2 mb-3">
@@ -246,7 +300,7 @@ export function TaskDetailModal({
 
             {changelog.length > 0 ? (
               <div className="space-y-1">
-                {[...changelog].reverse().map((entry) => {
+                {changelog.map((entry) => {
                   const typeConfig = changeTypeConfig[entry.type];
                   const Icon = typeConfig.icon;
 
@@ -287,6 +341,16 @@ export function TaskDetailModal({
                           {entry.type === 'moved' && (
                             <>
                               Moved to <span className="text-text">{entry.projectName}</span>
+                            </>
+                          )}
+                          {entry.type === 'attachment_added' && (
+                            <>
+                              Attachment added: <span className="text-text">{entry.to}</span>
+                            </>
+                          )}
+                          {entry.type === 'attachment_removed' && (
+                            <>
+                              Attachment removed: <span className="text-text-muted">{entry.from}</span>
                             </>
                           )}
                         </p>

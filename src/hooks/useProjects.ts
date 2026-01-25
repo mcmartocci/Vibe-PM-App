@@ -20,6 +20,8 @@ export interface Project {
   name: string;
   color: string;
   stale_threshold_hours: number;
+  slack_webhook_url?: string;
+  slack_notifications_enabled?: boolean;
   created_at: string;
   task_count?: number;
   columns?: ProjectColumn[];
@@ -97,7 +99,7 @@ export function useProjects() {
     return newProject;
   };
 
-  const updateProject = async (id: string, updates: Partial<Pick<Project, 'name' | 'color' | 'stale_threshold_hours'>>) => {
+  const updateProject = async (id: string, updates: Partial<Pick<Project, 'name' | 'color' | 'stale_threshold_hours' | 'slack_webhook_url' | 'slack_notifications_enabled'>>) => {
     const supabase = createClient();
 
     const { data, error } = await supabase

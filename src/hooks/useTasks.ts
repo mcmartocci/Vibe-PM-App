@@ -32,6 +32,30 @@ export interface TaskChangelog {
   created_at: string;
 }
 
+// Helper to create a notification
+async function createNotification(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  type: string,
+  title: string,
+  body?: string,
+  projectId?: string,
+  taskId?: string
+) {
+  const { error } = await supabase.from('notifications').insert({
+    user_id: userId,
+    type,
+    title,
+    body: body || null,
+    project_id: projectId || null,
+    task_id: taskId || null,
+  });
+
+  if (error) {
+    console.error('Failed to create notification:', error);
+  }
+}
+
 export function useTasks(projectId: string | null, staleThresholdHours: number = 48) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [archivedTasks, setArchivedTasks] = useState<Task[]>([]);
@@ -164,6 +188,17 @@ export function useTasks(projectId: string | null, staleThresholdHours: number =
       type: 'created',
     });
 
+    // Create notification
+    await createNotification(
+      supabase,
+      user.id,
+      'task_created',
+      'Task created',
+      `"${title}" was added`,
+      projectId,
+      data.id
+    );
+
     const newTask = {
       ...data,
       time_in_stage: 0,
@@ -192,8 +227,10 @@ export function useTasks(projectId: string | null, staleThresholdHours: number =
       return null;
     }
 
-    // Add changelog entries for changes
+    // Add changelog entries and notifications for changes
     if (currentTask) {
+      const { data: { user } } = await supabase.auth.getUser();
+
       if (updates.status && updates.status !== currentTask.status) {
         await supabase.from('task_changelog').insert({
           task_id: id,
@@ -201,6 +238,18 @@ export function useTasks(projectId: string | null, staleThresholdHours: number =
           from_value: currentTask.status,
           to_value: updates.status,
         });
+        // Notification for status change
+        if (user) {
+          await createNotification(
+            supabase,
+            user.id,
+            'status_changed',
+            'Status changed',
+            `"${currentTask.title}" moved to ${updates.status}`,
+            projectId || undefined,
+            id
+          );
+        }
       }
       if (updates.priority && updates.priority !== currentTask.priority) {
         await supabase.from('task_changelog').insert({
@@ -209,6 +258,18 @@ export function useTasks(projectId: string | null, staleThresholdHours: number =
           from_value: currentTask.priority,
           to_value: updates.priority,
         });
+        // Notification for priority change
+        if (user) {
+          await createNotification(
+            supabase,
+            user.id,
+            'priority_changed',
+            'Priority changed',
+            `"${currentTask.title}" priority set to ${updates.priority}`,
+            projectId || undefined,
+            id
+          );
+        }
       }
       if (updates.title && updates.title !== currentTask.title) {
         await supabase.from('task_changelog').insert({
@@ -247,6 +308,7 @@ export function useTasks(projectId: string | null, staleThresholdHours: number =
 
   const archiveTask = async (id: string) => {
     const supabase = createClient();
+    const currentTask = tasks.find(t => t.id === id);
 
     const { data, error } = await supabase
       .from('tasks')
@@ -258,6 +320,20 @@ export function useTasks(projectId: string | null, staleThresholdHours: number =
     if (error) {
       setError(error.message);
       return null;
+    }
+
+    // Create notification
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user && currentTask) {
+      await createNotification(
+        supabase,
+        user.id,
+        'task_archived',
+        'Task archived',
+        `"${currentTask.title}" was archived`,
+        projectId || undefined,
+        id
+      );
     }
 
     // Remove from active tasks, add to archived
@@ -298,6 +374,7 @@ export function useTasks(projectId: string | null, staleThresholdHours: number =
 
   const deleteTask = async (id: string) => {
     const supabase = createClient();
+    const taskToDelete = tasks.find(t => t.id === id) || archivedTasks.find(t => t.id === id);
 
     const { error } = await supabase
       .from('tasks')
@@ -307,6 +384,19 @@ export function useTasks(projectId: string | null, staleThresholdHours: number =
     if (error) {
       setError(error.message);
       return false;
+    }
+
+    // Create notification (note: task_id will be null since task is deleted)
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user && taskToDelete) {
+      await createNotification(
+        supabase,
+        user.id,
+        'task_deleted',
+        'Task deleted',
+        `"${taskToDelete.title}" was deleted`,
+        projectId || undefined
+      );
     }
 
     setTasks(prev => prev.filter(t => t.id !== id));

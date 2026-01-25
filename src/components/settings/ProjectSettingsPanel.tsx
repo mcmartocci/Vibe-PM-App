@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { X, Settings, Clock, Save } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { SlackSettings } from './SlackSettings';
 
 // Minimal project info needed for settings
 interface ProjectSettingsInfo {
@@ -10,13 +11,19 @@ interface ProjectSettingsInfo {
   name: string;
   color: string;
   staleThresholdHours: number;
+  slackWebhookUrl?: string;
+  slackNotificationsEnabled?: boolean;
 }
 
 interface ProjectSettingsPanelProps {
   isOpen: boolean;
   onClose: () => void;
   project: ProjectSettingsInfo;
-  onUpdateProject: (id: string, updates: { stale_threshold_hours?: number }) => Promise<void>;
+  onUpdateProject: (id: string, updates: {
+    stale_threshold_hours?: number;
+    slack_webhook_url?: string;
+    slack_notifications_enabled?: boolean;
+  }) => Promise<void>;
 }
 
 export function ProjectSettingsPanel({
@@ -28,6 +35,12 @@ export function ProjectSettingsPanel({
   const [staleThreshold, setStaleThreshold] = useState(
     project.staleThresholdHours ?? 48
   );
+  const [slackEnabled, setSlackEnabled] = useState(
+    project.slackNotificationsEnabled ?? false
+  );
+  const [slackWebhookUrl, setSlackWebhookUrl] = useState(
+    project.slackWebhookUrl ?? ''
+  );
   const [isSaving, setIsSaving] = useState(false);
 
   if (!isOpen) return null;
@@ -35,7 +48,11 @@ export function ProjectSettingsPanel({
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      await onUpdateProject(project.id, { stale_threshold_hours: staleThreshold });
+      await onUpdateProject(project.id, {
+        stale_threshold_hours: staleThreshold,
+        slack_webhook_url: slackWebhookUrl || undefined,
+        slack_notifications_enabled: slackEnabled,
+      });
       onClose();
     } catch (error) {
       console.error('Failed to update project settings:', error);
@@ -44,7 +61,11 @@ export function ProjectSettingsPanel({
     }
   };
 
-  const hasChanges = staleThreshold !== (project.staleThresholdHours ?? 48);
+  const hasStaleChanges = staleThreshold !== (project.staleThresholdHours ?? 48);
+  const hasSlackChanges =
+    slackEnabled !== (project.slackNotificationsEnabled ?? false) ||
+    slackWebhookUrl !== (project.slackWebhookUrl ?? '');
+  const hasChanges = hasStaleChanges || hasSlackChanges;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -144,6 +165,18 @@ export function ProjectSettingsPanel({
               </div>
             </div>
           </div>
+
+          {/* Divider */}
+          <div className="h-px bg-line-subtle" />
+
+          {/* Slack Notifications Section */}
+          <SlackSettings
+            projectName={project.name}
+            enabled={slackEnabled}
+            webhookUrl={slackWebhookUrl}
+            onEnabledChange={setSlackEnabled}
+            onWebhookUrlChange={setSlackWebhookUrl}
+          />
 
           {/* Divider */}
           <div className="h-px bg-line-subtle" />

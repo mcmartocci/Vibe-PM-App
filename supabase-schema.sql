@@ -269,6 +269,121 @@ CREATE INDEX idx_notes_user_id ON notes(user_id);
 -- UPDATE profiles SET is_admin = true WHERE email = 'your-email@example.com';
 
 -- ================================================
+-- NOTIFICATIONS TABLE (v3.0)
+-- ================================================
+
+CREATE TABLE notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  task_id UUID REFERENCES tasks(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT,
+  is_read BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX idx_notifications_user_unread ON notifications(user_id, is_read) WHERE is_read = FALSE;
+CREATE INDEX idx_notifications_created_at ON notifications(created_at DESC);
+
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own notifications"
+  ON notifications FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own notifications"
+  ON notifications FOR UPDATE
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can create notifications"
+  ON notifications FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own notifications"
+  ON notifications FOR DELETE
+  USING (auth.uid() = user_id);
+
+-- ================================================
+-- TASK ATTACHMENTS TABLE (v3.0)
+-- ================================================
+
+CREATE TABLE task_attachments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id UUID REFERENCES tasks(id) ON DELETE CASCADE NOT NULL,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  file_name TEXT NOT NULL,
+  file_type TEXT NOT NULL,
+  file_size INT NOT NULL,
+  storage_path TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_task_attachments_task_id ON task_attachments(task_id);
+CREATE INDEX idx_task_attachments_user_id ON task_attachments(user_id);
+
+-- Trigger to enforce max 5 attachments per task
+CREATE OR REPLACE FUNCTION check_attachment_limit()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF (SELECT COUNT(*) FROM task_attachments WHERE task_id = NEW.task_id) >= 5 THEN
+    RAISE EXCEPTION 'Maximum 5 attachments per task allowed';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER enforce_attachment_limit
+  BEFORE INSERT ON task_attachments
+  FOR EACH ROW EXECUTE FUNCTION check_attachment_limit();
+
+ALTER TABLE task_attachments ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own task attachments"
+  ON task_attachments FOR SELECT
+  USING (user_id = auth.uid());
+
+CREATE POLICY "Users can create task attachments"
+  ON task_attachments FOR INSERT
+  WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can delete own task attachments"
+  ON task_attachments FOR DELETE
+  USING (user_id = auth.uid());
+
+-- ================================================
+-- SLACK INTEGRATION (add columns to projects)
+-- ================================================
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS slack_webhook_url TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS slack_notifications_enabled BOOLEAN DEFAULT FALSE;
+
+-- ================================================
+-- SUPABASE STORAGE SETUP
+-- ================================================
+-- Run these in Supabase Dashboard > Storage:
+-- 1. Create bucket: task-attachments
+-- 2. Set public: false
+-- 3. Max file size: 5MB
+-- 4. Allowed MIME types: image/jpeg, image/png, image/gif, image/webp,
+--    application/pdf, application/msword, text/plain, text/csv
+--
+-- Storage RLS policies (run in SQL editor):
+-- CREATE POLICY "Users can upload own attachments"
+--   ON storage.objects FOR INSERT
+--   WITH CHECK (bucket_id = 'task-attachments' AND auth.uid()::text = (storage.foldername(name))[1]);
+--
+-- CREATE POLICY "Users can view own attachments"
+--   ON storage.objects FOR SELECT
+--   USING (bucket_id = 'task-attachments' AND auth.uid()::text = (storage.foldername(name))[1]);
+--
+-- CREATE POLICY "Users can delete own attachments"
+--   ON storage.objects FOR DELETE
+--   USING (bucket_id = 'task-attachments' AND auth.uid()::text = (storage.foldername(name))[1]);
+
+-- ================================================
 -- MIGRATION: For existing databases (v2.0)
 -- ================================================
 -- Run this section if you already have data and want to add the new features.

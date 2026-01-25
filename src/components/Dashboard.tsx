@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Folder, Pencil, Settings, LogOut, Archive, Columns3, Sliders } from 'lucide-react';
+import { Folder, Pencil, Settings, LogOut, Archive, Columns3, Sliders, Timer } from 'lucide-react';
 import { Task as LegacyTask, TaskStatus, TaskPriority, Project as LegacyProject, ColumnConfig } from '@/types';
 import { useAuth } from '@/hooks/useAuth';
 import { useProjects, Project } from '@/hooks/useProjects';
@@ -17,6 +17,9 @@ import { SettingsPanel } from './settings/SettingsPanel';
 import { ArchivePanel } from './archive/ArchivePanel';
 import { ColumnManager } from './settings/ColumnManager';
 import { ProjectSettingsPanel } from './settings/ProjectSettingsPanel';
+import { NotificationCenter } from './notifications/NotificationCenter';
+import { TimeReportPanel } from './reports/TimeReportPanel';
+import { useAttachmentCounts } from '@/hooks/useAttachmentCounts';
 
 // Transform Supabase task to legacy format for child components
 function transformTask(task: Task, changelog: TaskChangelog[] = []): LegacyTask {
@@ -97,6 +100,10 @@ export function Dashboard() {
     generateSlug,
   } = useColumns(activeProjectId);
 
+  // Get attachment counts for all tasks
+  const taskIds = useMemo(() => tasks.map(t => t.id), [tasks]);
+  const { getCount: getAttachmentCount } = useAttachmentCounts(taskIds);
+
   const [isEditingHeader, setIsEditingHeader] = useState(false);
   const [headerEditName, setHeaderEditName] = useState('');
   const headerInputRef = useRef<HTMLInputElement>(null);
@@ -107,6 +114,7 @@ export function Dashboard() {
   const [isArchiveOpen, setIsArchiveOpen] = useState(false);
   const [isColumnManagerOpen, setIsColumnManagerOpen] = useState(false);
   const [isProjectSettingsOpen, setIsProjectSettingsOpen] = useState(false);
+  const [isTimeReportOpen, setIsTimeReportOpen] = useState(false);
 
   // Set active project when projects load
   useEffect(() => {
@@ -275,7 +283,7 @@ export function Dashboard() {
     refetchProjects();
   };
 
-  const handleUpdateProjectSettings = async (id: string, updates: { stale_threshold_hours?: number }) => {
+  const handleUpdateProjectSettings = async (id: string, updates: { stale_threshold_hours?: number; slack_webhook_url?: string; slack_notifications_enabled?: boolean }) => {
     await updateProject(id, updates);
     await refetchProjects();
   };
@@ -416,6 +424,13 @@ export function Dashboard() {
                       </button>
                       <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center gap-1 ml-2">
                         <button
+                          onClick={() => setIsTimeReportOpen(true)}
+                          className="p-1.5 rounded-lg text-text-muted hover:text-amber hover:bg-elevated transition-all duration-150"
+                          title="Time Report"
+                        >
+                          <Timer size={16} />
+                        </button>
+                        <button
                           onClick={() => setIsColumnManagerOpen(true)}
                           className="p-1.5 rounded-lg text-text-muted hover:text-amber hover:bg-elevated transition-all duration-150"
                           title="Manage columns"
@@ -444,6 +459,7 @@ export function Dashboard() {
 
             {/* Header Actions - Global only */}
             <div className="flex items-center gap-2">
+              <NotificationCenter />
               <button
                 onClick={() => setIsArchiveOpen(true)}
                 className="p-2.5 rounded-xl text-text-muted hover:text-text hover:bg-elevated border border-transparent hover:border-line transition-all duration-150"
@@ -489,6 +505,7 @@ export function Dashboard() {
                     onColumnReorder={handleColumnReorder}
                     onColumnAdd={handleColumnAdd}
                     onColumnDelete={handleColumnDelete}
+                    getAttachmentCount={getAttachmentCount}
                   />
                 )}
               </main>
@@ -579,8 +596,21 @@ export function Dashboard() {
             name: activeProject.name,
             color: activeProject.color,
             staleThresholdHours: activeProject.stale_threshold_hours ?? 48,
+            slackWebhookUrl: activeProject.slack_webhook_url || '',
+            slackNotificationsEnabled: activeProject.slack_notifications_enabled ?? false,
           }}
           onUpdateProject={handleUpdateProjectSettings}
+        />
+      )}
+
+      {/* Time Report Panel */}
+      {activeProject && (
+        <TimeReportPanel
+          isOpen={isTimeReportOpen}
+          onClose={() => setIsTimeReportOpen(false)}
+          projectId={activeProject.id}
+          projectName={activeProject.name}
+          columns={columns}
         />
       )}
     </div>

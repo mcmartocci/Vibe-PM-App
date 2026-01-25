@@ -50,6 +50,7 @@ interface KanbanBoardProps {
   onColumnReorder?: (columnIds: string[]) => void;
   onColumnAdd?: (title: string) => void;
   onColumnDelete?: (columnId: string) => void;
+  getAttachmentCount?: (taskId: string) => number;
 }
 
 // Sortable column header component
@@ -184,6 +185,7 @@ export function KanbanBoard({
   onColumnReorder,
   onColumnAdd,
   onColumnDelete,
+  getAttachmentCount,
 }: KanbanBoardProps) {
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority[]>([]);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
@@ -510,6 +512,7 @@ export function KanbanBoard({
                   onMoveClick={onMoveClick}
                   onTaskClick={onTaskClick}
                   hideHeader
+                  getAttachmentCount={getAttachmentCount}
                 />
               </div>
               );

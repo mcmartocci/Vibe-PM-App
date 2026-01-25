@@ -16,6 +16,7 @@ interface KanbanColumnProps {
   onMoveClick?: (task: Task) => void;
   onTaskClick?: (task: Task) => void;
   hideHeader?: boolean;
+  getAttachmentCount?: (taskId: string) => number;
 }
 
 // Default color configurations for legacy column IDs
@@ -40,7 +41,7 @@ const fallbackConfig = {
   glow: 'group-hover:shadow-[0_0_20px_rgba(100,116,139,0.15)]',
 };
 
-export function KanbanColumn({ column, tasks, onAddTask, onDeleteTask, onUpdatePriority, onMoveClick, onTaskClick, hideHeader }: KanbanColumnProps) {
+export function KanbanColumn({ column, tasks, onAddTask, onDeleteTask, onUpdatePriority, onMoveClick, onTaskClick, hideHeader, getAttachmentCount }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
   });
@@ -91,6 +92,7 @@ export function KanbanColumn({ column, tasks, onAddTask, onDeleteTask, onUpdateP
               onTaskClick={onTaskClick}
               timeInStage={task.timeInStage}
               isStale={task.isStale}
+              attachmentCount={getAttachmentCount?.(task.id)}
             />
           ))}
         </SortableContext>

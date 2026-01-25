@@ -2,7 +2,7 @@
 
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { X, GripVertical, Flag, FolderInput, Check, Clock } from 'lucide-react';
+import { X, GripVertical, Flag, FolderInput, Check, Clock, Paperclip } from 'lucide-react';
 import { Task, TaskPriority } from '@/types';
 import { cn } from '@/lib/utils';
 
@@ -26,6 +26,7 @@ interface TaskCardProps {
   isDragOverlay?: boolean;
   timeInStage?: number;
   isStale?: boolean;
+  attachmentCount?: number;
 }
 
 const priorityConfig: Record<TaskPriority, { color: string; bg: string; label: string }> = {
@@ -36,7 +37,7 @@ const priorityConfig: Record<TaskPriority, { color: string; bg: string; label: s
 
 const priorityOrder: TaskPriority[] = ['low', 'medium', 'high'];
 
-export function TaskCard({ task, onDelete, onUpdatePriority, onMoveClick, onTaskClick, isDragOverlay, timeInStage, isStale }: TaskCardProps) {
+export function TaskCard({ task, onDelete, onUpdatePriority, onMoveClick, onTaskClick, isDragOverlay, timeInStage, isStale, attachmentCount }: TaskCardProps) {
   const {
     attributes,
     listeners,
@@ -190,6 +191,21 @@ export function TaskCard({ task, onDelete, onUpdatePriority, onMoveClick, onTask
           >
             <Clock size={10} />
             {formatTimeInStage(timeInStage)}
+          </div>
+        )}
+
+        {/* Attachment Indicator */}
+        {attachmentCount !== undefined && attachmentCount > 0 && (
+          <div
+            className={cn(
+              'inline-flex items-center gap-1 px-2 py-1 rounded-md',
+              'text-xs font-medium',
+              'bg-mist/15 text-mist'
+            )}
+            title={`${attachmentCount} attachment${attachmentCount !== 1 ? 's' : ''}`}
+          >
+            <Paperclip size={10} />
+            {attachmentCount}
           </div>
         )}
 
